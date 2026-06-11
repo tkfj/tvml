@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/app:cached
+      - ../../tvdb:/app/db:cached
+    environment:
+      - MECAB_API_URL=http://psv.internal:8097/parse
+    # 開発中にコンテナが終了しないようにする
+    command: /bin/sh -c "while sleep 1000; do :; done"

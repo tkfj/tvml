@@ -1,0 +1,7 @@
+services:
+  batch-job:
+    build: .
+    volumes:
+      - ../tvdb:/app/db
+    environment:
+      - MECAB_API_URL=http://psv.internal:8097/parse
