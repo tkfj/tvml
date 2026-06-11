@@ -41,7 +41,7 @@ class PrepareCore(ABC):
         return colnames, coltypes, colnnuls, pks
     
     def init_inssql(self):
-        inskeys = list(itertools.chain(['src'], self.colnames,['words1','words2','interaction']))
+        inskeys = list(itertools.chain(['src'], self.colnames,['words1','words2','interaction','is_blocked']))
         updkeys = [n for n in inskeys if n not in ['src', 'pgm_uid']]
         inssql = "INSERT INTO tvml ("
         inssql += ", ".join(inskeys) 
@@ -132,8 +132,13 @@ class PrepareCore(ABC):
         return tokens
 
     def proc_one_token(self, token):
+        if token['pos'] == '感動詞'\
+            and (token['base_form'] not in ['おはよう','おやすみ','こんにちは','こんばんは']):
+            return None
         if token['pos'] not in ['名詞','動詞','形容詞']:
             return None
+        # if (token['pos_detail1']=='形容動詞語幹' or token['pos_detail2']=='形容動詞語幹' or token['pos_detail3']=='形容動詞語幹'):
+        #     return None
         if (token['pos_detail1']=='非自立' or token['pos_detail2']=='非自立' or token['pos_detail3']=='非自立'):
             return None
         if token['pos']=='動詞' \
@@ -141,7 +146,11 @@ class PrepareCore(ABC):
             return None
         if token['pos']=='名詞' \
             and token['base_form'] in [
-                'デジタルリマスター','リマスター','シリーズ','部','シーズン',
+                'デジタルリマスター','リマスター',
+                '字幕スーパー','レターボックスサイズ',
+                'シリーズ','版','部','シーズン',# 'セレクション', セレクションはショッピング系の重要ワードのため残す
+                '人気',
+                'テレビ','TV','番組','今回','国民的','人気','このあと','この後',
                 '［無料］','［デ］','［二］','［解］','［字］','［SS］'
             ]:
             return 
@@ -192,6 +201,8 @@ where rk=1
         """
         データベースから番組情報を1件ずつ辞書形式で返すジェネレータ
         """
+        if not os.path.isfile(self.db_path_intr):
+            return
         conn = sqlite3.connect(self.db_path_intr)
         conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
         cursor = conn.cursor()
@@ -210,9 +221,9 @@ SELECT * FROM interactions
         createtable += ", ".join([
             f"{n} {t}{' NOT NULL' if nn else ''}"
             for n,t,nn
-            in zip(itertools.chain(['src'], self.colnames, ['words1','words2','interaction','pred_label','pred_proba'])
-                    , itertools.chain(['INTEGER'], self.coltypes, ['TEXT','TEXT','TEXT','TEXT','REAL'])
-                    , itertools.chain([True], self.colnnuls, [False,False,False,False,False])
+            in zip(itertools.chain(['src'], self.colnames, ['words1','words2','interaction','pred_label','pred_proba','is_blocked'])
+                    , itertools.chain(['INTEGER'], self.coltypes, ['TEXT','TEXT','TEXT','TEXT','REAL','INTEGER'])
+                    , itertools.chain([True], self.colnnuls, [False,False,False,False,False,True])
                 )
         ])
         pkss=list(itertools.chain(['src'], self.pks))

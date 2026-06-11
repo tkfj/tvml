@@ -16,6 +16,7 @@ class Prepare1(PrepareCore):
                     print(f"{pgm['pg_title']} {pgm['pg_detail']}")
                     pgm['words1'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_title'])),ensure_ascii=False)
                     pgm['words2'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_detail'])),ensure_ascii=False)
+                    pgm['is_blocked'] = 0
                     pgm['src']=0
                     inpgm={ f"{n}":pgm.get(n) for n in self.inskeys }
                     conn.execute(self.inssql, inpgm)
