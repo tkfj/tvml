@@ -32,7 +32,7 @@ ORDER BY bsdate, pg_start, pg_end
         conn.close()
 
 def main():
-    today = datetime.datetime.now().strftime("%Y%m%d%H%M")
+    today = datetime.datetime.now().strftime("%Y%m%d")
     for pg in stream_recommend_data(today):
         print(f'({pg["pred_proba"]:.4f}) {pg["pg_start"][0:4]}-{pg["pg_start"][4:6]}-{pg["pg_start"][6:8]} {pg["pg_start"][8:10]}:{pg["pg_start"][10:12]} {pg["pg_title"]} {pg["pg_detail"]}')
         

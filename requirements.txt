@@ -1,3 +1,4 @@
 requests
 gensim #word2vec
 scikit-learn
+PyYAML

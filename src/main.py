@@ -24,7 +24,7 @@ SELECT * FROM tvml
 WHERE
 (src = 0)
 OR
-(src = 1 AND interaction in ('p', 'n'))
+(src in (1,9) AND interaction in ('p', 'n'))
         """)
         for row in cursor:
             yield dict(row)
@@ -56,7 +56,7 @@ def main():
         epochs=50,           # 繰り返し学習回数を少し多めにして定着させる
         negative=10
     )
-    for word in ["テレビショッピング", "サスペンス", "WEC", "FORMULA"]:
+    for word in ["ショッピング", "サスペンス", "WEC", "FORMULA", "EWC"]:
         if word in d2v_model.wv:
             similars = d2v_model.wv.most_similar(word, topn=5)
             for t, score in similars:

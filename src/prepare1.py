@@ -13,9 +13,8 @@ class Prepare1(PrepareCore):
         try:
             with conn:
                 for pgm in self.stream_programs():
-                    print(pgm['pg_title'])
+                    print(f"{pgm['pg_title']} {pgm['pg_detail']}")
                     pgm['words1'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_title'])),ensure_ascii=False)
-                    print(pgm['pg_detail'])
                     pgm['words2'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_detail'])),ensure_ascii=False)
                     pgm['src']=0
                     inpgm={ f"{n}":pgm.get(n) for n in self.inskeys }

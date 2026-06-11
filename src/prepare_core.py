@@ -140,9 +140,15 @@ class PrepareCore(ABC):
             and token['base_form'] in ['する','れる','られる','ある','なる','いる','いく','いう','せる']:
             return None
         if token['pos']=='名詞' \
+            and token['base_form'] in [
+                'デジタルリマスター','リマスター','シリーズ','部','シーズン',
+                '［無料］','［デ］','［二］','［解］','［字］','［SS］'
+            ]:
+            return 
+        if token['pos']=='名詞' \
             and token['pos_detail1'] == 'サ変接続' \
             and token['base_form'] == '*':
-            # print(token)
+            # 記号
             return 
         if token['surface'] == "・" and token['base_form'] == "・":
             # 記号ではなく名詞/数になることがある
