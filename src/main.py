@@ -38,9 +38,6 @@ def main():
         pg['ws']=list(itertools.chain(json.loads(pg["words1"]),json.loads(pg["words2"])))
         pgs.append(pg)
         # print(pg)
-    # ここで学習用ファイルへの書き出しや、モデルへの投入を行う
-    # 例: print(f"Processing ID: {program['id']}")
-    # process_for_ml(tokenized_title, tokenized_desc, program['category'])
 
     tagged_data = [
         TaggedDocument(
@@ -76,23 +73,9 @@ def main():
             X_train.append(vec)
             y_train.append(pg['interaction'])
     
-    # classifier = SVC(kernel='linear', C=1.0, probability=True, class_weight='balanced', random_state=43)
-    # classifier = SVC(kernel='rbf', C=1.0, gamma='scale', probability=True, class_weight='balanced', random_state=43)
     base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
     classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
     classifier.fit(X_train, y_train)
-
-    # for pg in pgs:
-    #     if pg.get('interaction'):
-    #         pass
-    #     else:
-    #         print(f'{pg["pg_title"]} {pg["pg_detail"]}')
-    #         similar_docs = d2v_model.dv.most_similar(pg["id"], topn=3)
-    #         for doc_id, score in similar_docs:
-    #             for pg2 in pgs:
-    #                 if pg2["id"] == doc_id:
-    #                     print(f'  類似番組: ({score:.4f}) {pg2["pg_title"]} {pg2["pg_detail"]}')
-
 
     connz = sqlite3.connect(db_path)
     connz.row_factory = sqlite3.Row
@@ -111,7 +94,6 @@ def main():
                         print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
-        
 
 if __name__ == "__main__":
     main()

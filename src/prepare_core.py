@@ -41,7 +41,6 @@ class PrepareCore(ABC):
         return colnames, coltypes, colnnuls, pks
     
     def init_inssql(self):
-        # inskeys = list(itertools.chain(['src'], self.colnames,['words1','words2','interaction','pred_label','pred_proba']))
         inskeys = list(itertools.chain(['src'], self.colnames,['words1','words2','interaction']))
         updkeys = [n for n in inskeys if n not in ['src', 'pgm_uid']]
         inssql = "INSERT INTO tvml ("
@@ -53,49 +52,11 @@ class PrepareCore(ABC):
         return inskeys, updkeys, inssql
 
 
-    # def call_mecab_api_pre(self,text):
-    #     """
-    #     本解析の前に、単純な単語の置換や削除を行うための形態素解析
-    #     """
-    #     text = text.upper()
-    #     response = self.session.post(self.MECAB_API_URL, json={"text": text})
-    #     tokens = response.json().get("analysis")
-    #     new_text = ""
-    #     if tokens:
-    #         p = 0
-    #         bef_token = None
-    #         for token in tokens:
-    #             w = token['surface']
-    #             l = len(w)
-    #             p1 = text.find(w, p)
-    #             if p1 > p:
-    #                 new_text += text[p:p1]
-    #             p = p1 + l
-    #             if token['pos'] == '名詞' \
-    #                 and token['surface'] == 'TV':
-    #                 new_text += 'テレビ'
-    #             elif token['pos'] == '名詞' \
-    #                 and token['surface'] == 'お天気':
-    #                 new_text += '天気'
-    #             elif token['pos'] == '名詞' \
-    #                 and (token['pos_detail1']=='人名' or token['pos_detail2']=='人名' or token['pos_detail3']=='人名') \
-    #                 and (token['pos_detail1']=='接尾' or token['pos_detail2']=='接尾' or token['pos_detail3']=='接尾') \
-    #                 and bef_token and bef_token['pos']=='名詞' \
-    #                 and (bef_token['pos_detail1']=='人名' or bef_token['pos_detail2']=='人名' or bef_token['pos_detail3']=='人名'):
-    #                 # 敬称の「さん」を削除する
-    #                 pass
-    #             else:
-    #                 new_text += token['surface']
-    #             bef_token = token
-    #     # print(f"Processed pre text: {new_text}")
-    #     return new_text
-
     def call_mecab_api(self,text):
-        # text = self.call_mecab_api_pre(text)
         text = text.upper()
         text = text.replace("(","（")
         text = text.replace(")","）")
-        text = text.replace("[","］")
+        text = text.replace("[","［")
         text = text.replace("]","］")
         response = self.session.post(self.MECAB_API_URL, json={"text": text})
         tokens = response.json().get("analysis")
@@ -170,7 +131,7 @@ class PrepareCore(ABC):
         #     tokens = tokens2
         return tokens
 
-    def proc_one_(self, token):
+    def proc_one_token(self, token):
         if token['pos'] not in ['名詞','動詞','形容詞']:
             return None
         if (token['pos_detail1']=='非自立' or token['pos_detail2']=='非自立' or token['pos_detail3']=='非自立'):
@@ -189,31 +150,10 @@ class PrepareCore(ABC):
         # print(token)
         return token['base_form'] if token['base_form'] !='*' else token['surface']
 
-    def proc_one(self, tokenized):
-        # w_before = None
-        # for token in tokenized:
-        #     # print(token['surface'])
-        #     if token['pos'] == '名詞':
-        #         if w_before is not None:
-        #             w_before = {
-        #                 'surface': w_before["surface"] + "" + token['surface'],
-        #                 'base_form': w_before["base_form"] + "" + token['base_form'],
-        #                 'reading': w_before["reading"] + "" + token['reading'],
-        #                 'pos': '複合名詞'
-        #             }
-        #         else:
-        #             w_before = token
-        #         continue
-        #     elif w_before is not None:
-        #         proc_one_(w_before);
-        #         w_before = None
-        #         proc_one_(token);
-        # if w_before is not None:
-        #     proc_one_(w_before);
-
+    def proc_tokens(self, tokenized):
         sentence = []
         for token in tokenized:
-            s = self.proc_one_(token)
+            s = self.proc_one_token(token)
             if s:
                 sentence.append(s)
         return sentence
@@ -296,9 +236,9 @@ SELECT * FROM interactions
             with conn:
                 for pgm in itertools.chain(self.stream_interactions(),self.stream_programs()):
                     print(pgm['pg_title'])
-                    pgm['words1'] = json.dumps(self.proc_one(self.call_mecab_api(pgm['pg_title'])),ensure_ascii=False)
+                    pgm['words1'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_title'])),ensure_ascii=False)
                     print(pgm['pg_detail'])
-                    pgm['words2'] = json.dumps(self.proc_one(self.call_mecab_api(pgm['pg_detail'])),ensure_ascii=False)
+                    pgm['words2'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_detail'])),ensure_ascii=False)
                     pgm['src']=1
                     inpgm={ f"{n}":pgm.get(n) for n in self.inskeys }
                     conn.execute(self.inssql, inpgm)
