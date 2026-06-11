@@ -226,32 +226,3 @@ SELECT * FROM interactions
             conn_ml.execute(createtable)
         finally:
             conn_ml.close()
-
-    def main(self):
-        self.init_out_table()
-        conn=sqlite3.connect(self.db_path_ml)
-        conn.row_factory = sqlite3.Row
-
-        try:
-            with conn:
-                for pgm in itertools.chain(self.stream_interactions(),self.stream_programs()):
-                    print(pgm['pg_title'])
-                    pgm['words1'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_title'])),ensure_ascii=False)
-                    print(pgm['pg_detail'])
-                    pgm['words2'] = json.dumps(self.proc_tokens(self.call_mecab_api(pgm['pg_detail'])),ensure_ascii=False)
-                    pgm['src']=1
-                    inpgm={ f"{n}":pgm.get(n) for n in self.inskeys }
-                    conn.execute(self.inssql, inpgm)
-                    # 「with conn:」を使うことで、自動的に commit（保存）または rollback が行われます
-            # print("保存に成功しました。")
-        # except sqlite3.Error as e:
-        #     print(f"データベースエラーが発生しました: {e}")
-        #     print("実行しようとしたSQL:", inssql)
-        #     print("渡したデータ:", inpgm)
-        finally:
-            # 最後に必ず接続を閉じる
-            conn.close()
-
-if __name__ == "__main__":
-    core = PrepareCore()
-    core.main()
