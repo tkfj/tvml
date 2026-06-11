@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ソースコードのコピー
 COPY ./src ./src
+COPY static_tokens.yaml static_tokens.yaml
 
 # 本番実行用コマンド
 CMD ["python", "src/main.py"]

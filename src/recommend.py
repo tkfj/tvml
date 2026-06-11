@@ -22,6 +22,8 @@ SELECT * FROM tvml
 WHERE
 src = 0
 AND
+ignorelist = 0
+AND
 pred_label = 'p'
 {bind_sql}
 ORDER BY bsdate, pg_start, pg_end
