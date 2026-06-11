@@ -22,7 +22,7 @@ SELECT * FROM tvml
 WHERE
 src = 0
 AND
-ignorelist = 0
+is_blocked = 0
 AND
 pred_label = 'p'
 {bind_sql}
