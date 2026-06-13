@@ -2,6 +2,7 @@ import json
 import sqlite3
 import itertools
 import os
+import sys
 import yaml
 from typing import Iterator, Dict
 
@@ -34,17 +35,29 @@ OR
         conn.close()
 
 def main():
+    if os.path.isfile("./static_tokens.yaml"):
+        with open("./static_tokens.yaml") as f:
+            static_tokens_conf = yaml.safe_load(f)
+        blocklist = [set(b) for b in static_tokens_conf.get('blocklist',[])]
+        stations = static_tokens_conf.get('stations',{})
+    else:
+        blocklist = list()
+        stations = dict()
+
     pgs=[]
+    print('reading program data...', end='', file=sys.stderr, flush=True);
     for pg in stream_program_data():
         pg['id']=str(pg["src"])+":"+str(pg["pgm_uid"])
         pg['ws1']=list(json.loads(pg["words1"]))
         pg['ws2']=list(json.loads(pg["words2"]))
         pg['ws']=list(itertools.chain(pg["ws1"],pg["ws2"]))
         pgs.append(pg)
-        print(pg)
+        # print(pg)
+    print('finish.', file=sys.stderr, flush=True);
 
     # タイトルのみと、タイトル＋説明でベクトルデータを作る
     # 長すぎる説明で発散しないようにするため
+    print('create tags...', end='', file=sys.stderr, flush=True);
     tagged_data = list(itertools.chain([
         TaggedDocument(
             words=pg['ws1'],
@@ -64,7 +77,9 @@ def main():
         )
         for pg in pgs if len(pg['ws'])>0
     ]))
+    print('finish.', file=sys.stderr, flush=True);
 
+    print('doc2vec...', end='', file=sys.stderr, flush=True);
     d2v_model = Doc2Vec(
         documents=tagged_data,
         vector_size=64,     # 少ないデータなので64〜100がベスト
@@ -74,18 +89,22 @@ def main():
         epochs=50,           # 繰り返し学習回数を少し多めにして定着させる
         negative=10
     )
-    for word in ["ショッピング", "サスペンス", "WEC", "FORMULA", "EWC"]:
-        if word in d2v_model.wv:
-            similars = d2v_model.wv.most_similar(word, topn=5)
-            for t, score in similars:
-                print(f"{word} {t}: {score:.4f}")
-        else:
-            print(f"'{word}' is NOT in the vocabulary.")
+    print('finish.', file=sys.stderr, flush=True);
+    # for word in ["ショッピング", "サスペンス", "WEC", "FORMULA", "EWC"]:
+    #     if word in d2v_model.wv:
+    #         similars = d2v_model.wv.most_similar(word, topn=5)
+    #         for t, score in similars:
+    #             print(f"{word} {t}: {score:.4f}")
+    #     else:
+    #         print(f"'{word}' is NOT in the vocabulary.")
 
     X_train = []
     y_train = []
     
+    print('make classifier...', end='', file=sys.stderr, flush=True);
     for pg in pgs:
+        if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
+            continue
         if pg.get('interaction') and pg['interaction'] in ['p','n']:
             if len(pg['ws1'])>0:
                 vec = d2v_model.dv[f"{pg['id']}:title"]
@@ -103,21 +122,18 @@ def main():
     base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
     classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
     classifier.fit(X_train, y_train)
+    print('finish.', file=sys.stderr, flush=True);
 
+    print('make predict...', end='', file=sys.stderr, flush=True);
     connz = sqlite3.connect(db_path)
     connz.row_factory = sqlite3.Row
     cursorz = connz.cursor()
 
-    if os.path.isfile("./static_tokens.yaml"):
-        with open("./static_tokens.yaml") as f:
-            static_tokens_conf = yaml.safe_load(f)
-        blocklist = [set(b) for b in static_tokens_conf.get('blocklist',[])]
-    else:
-        blocklist = list()
-
     try:
         with connz:
             for pg in pgs:
+                if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
+                    continue
                 is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
                 pred_label1=None
                 pred_label2=None
@@ -173,6 +189,7 @@ def main():
                             print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
+    print('finish.', file=sys.stderr, flush=True);
 
 if __name__ == "__main__":
     main()
