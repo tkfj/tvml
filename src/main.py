@@ -23,11 +23,23 @@ def stream_program_data() -> Iterator[Dict]:
 
     try:
         cursor.execute("""
-SELECT * FROM tvml
-WHERE
-(src = 0)
-OR
-(src in (1,9) AND interaction in ('p', 'n'))
+WITH
+    tvml_rank AS (
+    SELECT
+    *,
+    FIRST_VALUE(interaction) OVER(PARTITION BY bsdate,tuner,station_id,pg_start,pg_end,pg_title ORDER BY asof DESC) AS interaction_uq,
+    DENSE_RANK() OVER(PARTITION BY bsdate ORDER BY asof DESC) AS asofrk,
+    ROW_NUMBER() OVER(PARTITION BY pgm_uid ORDER BY src DESC) AS srcrk
+    FROM tvml
+    WHERE src in (0,1)
+)
+, tvml_latest AS (
+    SELECT *
+    FROM tvml_rank
+    WHERE asofrk=1
+    AND srcrk=1
+)
+SELECT * FROM tvml_latest
         """)
         for row in cursor:
             yield dict(row)
@@ -105,19 +117,19 @@ def main():
     for pg in pgs:
         if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
             continue
-        if pg.get('interaction') and pg['interaction'] in ['p','n']:
+        if pg.get('interaction_uq') and pg['interaction_uq'] in ['p','n']:
             if len(pg['ws1'])>0:
                 vec = d2v_model.dv[f"{pg['id']}:title"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(pg['interaction_uq'])
             if len(pg['ws2'])>0:
                 vec = d2v_model.dv[f"{pg['id']}:detail"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(pg['interaction_uq'])
             if len(pg['ws'])>0:
                 vec = d2v_model.dv[f"{pg['id']}:all"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(pg['interaction_uq'])
     
     base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
     classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
