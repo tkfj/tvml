@@ -209,7 +209,19 @@ where rk=1
         try:
             # 大量のデータを扱うため、一度にフェッチせずカーソルを回す
             cursor.execute("""
-SELECT * FROM interactions
+WITH
+    interactions_rank AS (
+    SELECT
+    *,
+    ROW_NUMBER() OVER(PARTITION BY bsdate,tuner,station_id,pg_start,pg_end,pg_title ORDER BY asof DESC) AS asofrk
+    FROM interactions
+)
+, interactions_latest AS (
+    SELECT *
+    FROM interactions_rank
+    WHERE asofrk=1
+)
+SELECT * FROM interactions_latest
             """)
             for row in cursor:
                 yield dict(row)
