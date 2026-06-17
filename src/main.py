@@ -18,11 +18,11 @@ db_out_path = "./db/tvml.db"
 def get_cpu_or_gpu():
     # XGBoostがCUDA付きでビルドされており、かつNVIDIAのドライバーが認識できていれば 'cuda' を返す
     try:
-        build_info = xgb.core.get_build_info()
-        if "CUDA" in build_info.get("SUPPORTED_DEVICE_PLUGINS", []):
-            # 実際にGPUが刺さっているかダミーデータで一瞬テスト
-            xgb.XGBClassifier(tree_method='hist', device='cuda')
-            return 'cuda'
+        # ダミーデータ（1件）で一瞬だけcudaモードの学習テストを走らせる
+        test_model = xgb.XGBClassifier(tree_method="hist", device="cuda")
+        test_model.fit([[0]], [0])
+        # 成功したら文句なしでGPUモード
+        return 'cuda'
     except Exception:
         pass
     return 'cpu'

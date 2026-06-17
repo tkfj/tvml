@@ -5,3 +5,10 @@ services:
       - ../tvdb:/app/db
     environment:
       - MECAB_API_URL=http://psv.internal:8097/parse
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
