@@ -11,35 +11,20 @@ from sklearn.svm import SVC
 from sklearn.calibration import CalibratedClassifierCV
 import numpy as np
 
-db_path = "./db/tvml.db"
+db_in_path = "./db/tvml0.db"
+db_out_path = "./db/tvml.db"
 
 def stream_program_data() -> Iterator[Dict]:
     """
     データベースから番組情報を1件ずつ辞書形式で返すジェネレータ
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_in_path)
     conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
-WITH
-    tvml_rank AS (
-    SELECT
-    *,
-    FIRST_VALUE(interaction) OVER(PARTITION BY bsdate,tuner,station_id,pg_start,pg_end,pg_title ORDER BY asof DESC) AS interaction_uq,
-    DENSE_RANK() OVER(PARTITION BY bsdate ORDER BY asof DESC) AS asofrk,
-    ROW_NUMBER() OVER(PARTITION BY pgm_uid ORDER BY src DESC) AS srcrk
-    FROM tvml
-    WHERE src in (0,1)
-)
-, tvml_latest AS (
-    SELECT *
-    FROM tvml_rank
-    WHERE asofrk=1
-    AND srcrk=1
-)
-SELECT * FROM tvml_latest
+SELECT * FROM tvml
         """)
         for row in cursor:
             yield dict(row)
@@ -59,7 +44,6 @@ def main():
     pgs=[]
     print('reading program data...', end='', file=sys.stderr, flush=True);
     for pg in stream_program_data():
-        pg['id']=str(pg["src"])+":"+str(pg["pgm_uid"])
         pg['ws1']=list(json.loads(pg["words1"]))
         pg['ws2']=list(json.loads(pg["words2"]))
         pg['ws']=list(itertools.chain(pg["ws1"],pg["ws2"]))
@@ -73,19 +57,19 @@ def main():
     tagged_data = list(itertools.chain([
         TaggedDocument(
             words=pg['ws1'],
-            tags=[f"{pg['id']}:title"]
+            tags=[f"{pg['uniqk']}:title"]
         )
         for pg in pgs if len(pg['ws1'])>0
     ],[
         TaggedDocument(
             words=pg['ws2'],
-            tags=[f"{pg['id']}:detail"]
+            tags=[f"{pg['uniqk']}:detail"]
         )
         for pg in pgs if len(pg['ws2'])>0
     ],[
         TaggedDocument(
             words=pg['ws'],
-            tags=[f"{pg['id']}:all"]
+            tags=[f"{pg['uniqk']}:all"]
         )
         for pg in pgs if len(pg['ws'])>0
     ]))
@@ -117,19 +101,19 @@ def main():
     for pg in pgs:
         if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
             continue
-        if pg.get('interaction_uq') and pg['interaction_uq'] in ['p','n']:
+        if pg.get('interaction') and pg['interaction'] in ['p','n']:
             if len(pg['ws1'])>0:
-                vec = d2v_model.dv[f"{pg['id']}:title"]
+                vec = d2v_model.dv[f"{pg['uniqk']}:title"]
                 X_train.append(vec)
-                y_train.append(pg['interaction_uq'])
+                y_train.append(pg['interaction'])
             if len(pg['ws2'])>0:
-                vec = d2v_model.dv[f"{pg['id']}:detail"]
+                vec = d2v_model.dv[f"{pg['uniqk']}:detail"]
                 X_train.append(vec)
-                y_train.append(pg['interaction_uq'])
+                y_train.append(pg['interaction'])
             if len(pg['ws'])>0:
-                vec = d2v_model.dv[f"{pg['id']}:all"]
+                vec = d2v_model.dv[f"{pg['uniqk']}:all"]
                 X_train.append(vec)
-                y_train.append(pg['interaction_uq'])
+                y_train.append(pg['interaction'])
     
     base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
     classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
@@ -137,14 +121,14 @@ def main():
     print('finish.', file=sys.stderr, flush=True);
 
     print('make predict...', end='', file=sys.stderr, flush=True);
-    connz = sqlite3.connect(db_path)
+    connz = sqlite3.connect(db_in_path)
     connz.row_factory = sqlite3.Row
     cursorz = connz.cursor()
 
     try:
         with connz:
             for pg in pgs:
-                if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
+                if not (pg['bsdate']=='00000000' or pg['is_target']==1):
                     continue
                 is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
                 pred_label1=None
@@ -193,15 +177,13 @@ def main():
                     pred_label = pred_label2
                     pred_proba = pred_proba2
                 if pred_label and pred_proba:
-                    cursorz.execute('update tvml set pred_label=?, pred_proba=?, is_blocked=? where src=? and pgm_uid=?',[pred_label, pred_proba, is_blocked, pg['src'], pg['pgm_uid']])
-                    if pg.get('src') is None:
-                        pass
-                    else:
-                        if pg['src'] == 0 and (not is_blocked) and pred_label == 'p':
+                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pred_label, pred_proba, pg['uniqk']])
+                    if (not is_blocked) and pg['is_target'] == 1 and pred_label == 'p':
                             print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
     print('finish.', file=sys.stderr, flush=True);
+    os.replace(db_in_path, db_out_path)
 
 if __name__ == "__main__":
     main()
