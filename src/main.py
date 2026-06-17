@@ -5,6 +5,7 @@ import os
 import sys
 import yaml
 from typing import Iterator, Dict
+import xgboost as xgb
 
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.svm import SVC
@@ -14,18 +15,27 @@ import numpy as np
 db_in_path = "./db/tvml0.db"
 db_out_path = "./db/tvml.db"
 
+def get_cpu_or_gpu():
+    # XGBoostがCUDA付きでビルドされており、かつNVIDIAのドライバーが認識できていれば 'cuda' を返す
+    try:
+        build_info = xgb.core.get_build_info()
+        if "CUDA" in build_info.get("SUPPORTED_DEVICE_PLUGINS", []):
+            # 実際にGPUが刺さっているかダミーデータで一瞬テスト
+            xgb.XGBClassifier(tree_method='hist', device='cuda')
+            return 'cuda'
+    except Exception:
+        pass
+    return 'cpu'
+
 def stream_program_data() -> Iterator[Dict]:
     """
     データベースから番組情報を1件ずつ辞書形式で返すジェネレータ
     """
     conn = sqlite3.connect(db_in_path)
-    conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
-    cursor = conn.cursor()
-
     try:
-        cursor.execute("""
-SELECT * FROM tvml
-        """)
+        conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tvml")
         for row in cursor:
             yield dict(row)
     finally:
@@ -53,7 +63,7 @@ def main():
 
     # タイトルのみと、タイトル＋説明でベクトルデータを作る
     # 長すぎる説明で発散しないようにするため
-    print('create tags...', end='', file=sys.stderr, flush=True);
+    print('create tags...', end='', file=sys.stderr, flush=True)
     tagged_data = list(itertools.chain([
         TaggedDocument(
             words=pg['ws1'],
@@ -81,7 +91,7 @@ def main():
         vector_size=64,     # 少ないデータなので64〜100がベスト
         dm=0,
         min_count=2,
-        workers=4,
+        workers=os.cpu_count(),
         epochs=50,           # 繰り返し学習回数を少し多めにして定着させる
         negative=10
     )
@@ -97,7 +107,7 @@ def main():
     X_train = []
     y_train = []
     
-    print('make classifier...', end='', file=sys.stderr, flush=True);
+    print('make classifier...', end='', file=sys.stderr, flush=True)
     for pg in pgs:
         if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
             continue
@@ -105,22 +115,41 @@ def main():
             if len(pg['ws1'])>0:
                 vec = d2v_model.dv[f"{pg['uniqk']}:title"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(1 if pg['interaction']=='p' else 0)
             if len(pg['ws2'])>0:
                 vec = d2v_model.dv[f"{pg['uniqk']}:detail"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(1 if pg['interaction']=='p' else 0)
             if len(pg['ws'])>0:
                 vec = d2v_model.dv[f"{pg['uniqk']}:all"]
                 X_train.append(vec)
-                y_train.append(pg['interaction'])
+                y_train.append(1 if pg['interaction']=='p' else 0)
     
-    base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
-    classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
-    classifier.fit(X_train, y_train)
+    # base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
+    # classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
+    
+    #classes = np.unique(y_train)
+    X_train_arr = np.array(X_train)
+    y_train_arr = np.array(y_train)
+    pos_count = np.sum(y_train_arr == 1)
+    neg_count = np.sum(y_train_arr == 0)
+    xgb_scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1
+    xgb_device = get_cpu_or_gpu()
+    xgb_n_jobs = -1 if xgb_device=='cpu' else None
+    print(pos_count, neg_count, xgb_scale_pos_weight, xgb_device, xgb_n_jobs)
+    base_xgb = xgb.XGBClassifier(
+      tree_method='hist',
+      device=xgb_device,
+      n_jobs=xgb_n_jobs,
+      scale_pos_weight=xgb_scale_pos_weight,
+      random_state=43,
+      eval_metric='logloss'
+    )
+    classifier = CalibratedClassifierCV(estimator=base_xgb, ensemble=False)
+    classifier.fit(X_train_arr, y_train_arr)
     print('finish.', file=sys.stderr, flush=True);
 
-    print('make predict...', end='', file=sys.stderr, flush=True);
+    print('make predict...', end='', file=sys.stderr, flush=True)
     connz = sqlite3.connect(db_in_path)
     connz.row_factory = sqlite3.Row
     cursorz = connz.cursor()
@@ -128,7 +157,7 @@ def main():
     try:
         with connz:
             for pg in pgs:
-                if not (pg['bsdate']=='00000000' or pg['is_target']==1):
+                if pg['is_target']==0 and pg['is_preinstalled']==0:
                     continue
                 is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
                 pred_label1=None
@@ -138,23 +167,23 @@ def main():
                 pred_proba=None
                 if len(pg['ws1'])>0:
                     vec1 = d2v_model.infer_vector(pg["ws1"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label1 = classifier.predict(vec1)[0]
+                    pred_label1 = 'p' if classifier.predict(vec1)[0] == 1 else 'n'
                     pred_proba1 = np.max(classifier.predict_proba(vec1)[0])
                 if len(pg['ws2'])>0:
                     vec2 = d2v_model.infer_vector(pg["ws2"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label2 = classifier.predict(vec2)[0]
+                    pred_label2 = 'p' if classifier.predict(vec2)[0] == 1 else 'n'
                     pred_proba2 = np.max(classifier.predict_proba(vec2)[0])
                 if len(pg['ws'])>0:
                     vec3 = d2v_model.infer_vector(pg["ws"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label3 = classifier.predict(vec3)[0]
+                    pred_label3 = 'p' if classifier.predict(vec3)[0] == 1 else 'n'
                     pred_proba3 = np.max(classifier.predict_proba(vec3)[0])
 
                 if pred_label3 and pred_label3 == 'p':
                     pred_label = pred_label3
                     pred_proba = pred_proba3
                 elif pred_label1 and pred_label1 == 'p':
-                    pred_label = pred_label2
-                    pred_proba = pred_proba2
+                    pred_label = pred_label1
+                    pred_proba = pred_proba1
                 elif pred_label2 and pred_label2 == 'p':
                     pred_label = pred_label2
                     pred_proba = pred_proba2
@@ -182,7 +211,7 @@ def main():
                             print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
-    print('finish.', file=sys.stderr, flush=True);
+    print('finish.', file=sys.stderr, flush=True)
     os.replace(db_in_path, db_out_path)
 
 if __name__ == "__main__":

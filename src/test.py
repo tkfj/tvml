@@ -27,9 +27,9 @@ cursor.execute(f"ATTACH DATABASE ? AS tvml_db", [db_path_ml])
 
 cursor.execute("""
 CREATE TABLE main.stations (
-tuner TEXT,
-station_id TEXT,
-is_target INTEGER
+  tuner TEXT,
+  station_id TEXT,
+  is_target INTEGER
 )
 """)
 
@@ -56,6 +56,7 @@ colnames=[
   'pred_label',
   'pred_proba',
   'is_target',
+  'is_preinstalled',
 ]
 create_tvml_sql = """
 CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
   interaction TEXT,
   pred_label TEXT,
   pred_proba REAL,
-  is_target INTEGER NOT NULL
+  is_target INTEGER NOT NULL,
+  is_preinstalled INTEGER NOT NULL
 )
 """
 create_idx_tvml_pgm_sql="""
@@ -111,9 +113,9 @@ with conn:
     for i, t in enumerate(static_tokens[intr]):
       cursor.execute("""
         INSERT INTO tvml0_db.tvml (
-          asof, bsdate, tuner, station_id, pg_start, pg_end, pg_title, pg_detail, interaction, is_target
-        ) VALUES(?,?,?,?,?,?,?,?,?,?)
-      """, ['000000000000', '00000000', f'__{intr}', f'{i:08}', '000000000000', '000000000001', t, '', intr, 0])
+          asof, bsdate, tuner, station_id, pg_start, pg_end, pg_title, pg_detail, interaction, is_target, is_preinstalled
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      """, ['000000000000', '00000000', f'__{intr}', f'{i:08}', '000000000000', '000000000001', t, '', intr, 0, 1])
 
 insert_pgm_sql = (
 "INSERT INTO tvml0_db.tvml ("
@@ -129,6 +131,7 @@ tvpgm_rank AS (
   SELECT
   p.*,
   COALESCE(s.is_target,0) as is_target,
+  0 as is_preinstalled,
   DENSE_RANK() OVER (PARTITION BY bsdate ORDER BY asof DESC) AS asof_rk
   FROM tvguide_db.programs AS p
   LEFT OUTER JOIN stations AS s
