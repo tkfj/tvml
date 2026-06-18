@@ -222,6 +222,12 @@ with conn:
       "update tvml0_db.tvml set words1=?, words2=? where uniqk=?"
       , [w1, w2, row['uniqk']]
     )
+  cursor.execute(
+    "select interaction,count(*) as c from tvml0_db.tvml group by interaction"
+  )
+  for row in cursor.fetchall():
+    print(f"{row['interaction']}: {row['c']}")
+  
 
 cursor.execute(f"DETACH DATABASE tvguide_db")
 cursor.execute(f"DETACH DATABASE tvlike_db")
