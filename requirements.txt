@@ -3,3 +3,5 @@ gensim #word2vec
 scikit-learn
 PyYAML
 xgboost
+plotext
+cython

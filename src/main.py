@@ -4,28 +4,21 @@ import itertools
 import os
 import sys
 import yaml
-from typing import Iterator, Dict
 import xgboost as xgb
+import numpy as np
+import plotext as plt
 
+from typing import Iterator, Dict
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.svm import SVC
 from sklearn.calibration import CalibratedClassifierCV
-import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, roc_auc_score, log_loss
+from sklearn.metrics import roc_curve
+
 
 db_in_path = "./db/tvml0.db"
 db_out_path = "./db/tvml.db"
-
-def get_cpu_or_gpu():
-    # XGBoostがCUDA付きでビルドされており、かつNVIDIAのドライバーが認識できていれば 'cuda' を返す
-    try:
-        # ダミーデータ（1件）で一瞬だけcudaモードの学習テストを走らせる
-        test_model = xgb.XGBClassifier(tree_method="hist", device="cuda")
-        test_model.fit([[0]], [0])
-        # 成功したら文句なしでGPUモード
-        return 'cuda'
-    except Exception:
-        pass
-    return 'cpu'
 
 def stream_program_data() -> Iterator[Dict]:
     """
@@ -46,10 +39,13 @@ def main():
         with open("./static_tokens.yaml") as f:
             static_tokens_conf = yaml.safe_load(f)
         blocklist = [set(b) for b in static_tokens_conf.get('blocklist',[])]
-        stations = static_tokens_conf.get('stations',{})
     else:
         blocklist = list()
-        stations = dict()
+
+    model_conf = {}
+    if os.path.isfile("./model_config.yaml"):
+        with open("./model_config.yaml") as f:
+            model_conf = yaml.safe_load(f)
 
     pgs=[]
     print('reading program data...', end='', file=sys.stderr, flush=True);
@@ -61,154 +57,137 @@ def main():
         # print(pg)
     print('finish.', file=sys.stderr, flush=True);
 
-    # タイトルのみと、タイトル＋説明でベクトルデータを作る
-    # 長すぎる説明で発散しないようにするため
     print('create tags...', end='', file=sys.stderr, flush=True)
     tagged_data = list(itertools.chain([
         TaggedDocument(
-            words=pg['ws1'],
-            tags=[f"{pg['uniqk']}:title"]
-        )
-        for pg in pgs if len(pg['ws1'])>0
-    ],[
-        TaggedDocument(
-            words=pg['ws2'],
-            tags=[f"{pg['uniqk']}:detail"]
-        )
-        for pg in pgs if len(pg['ws2'])>0
-    ],[
-        TaggedDocument(
             words=pg['ws'],
-            tags=[f"{pg['uniqk']}:all"]
+            tags=[pg['uniqk']]
         )
         for pg in pgs if len(pg['ws'])>0
     ]))
     print('finish.', file=sys.stderr, flush=True);
 
     print('doc2vec...', end='', file=sys.stderr, flush=True);
+    doc2vec_conf = model_conf.get('doc2vec',{})
+    doc2vec_conf['workers'] = max(os.cpu_count(),10) if doc2vec_conf.get('workers',-1)<0 else 3
     d2v_model = Doc2Vec(
         documents=tagged_data,
-        vector_size=64,     # 少ないデータなので64〜100がベスト
-        dm=0,
-        min_count=2,
-        workers=os.cpu_count(),
-        epochs=50,           # 繰り返し学習回数を少し多めにして定着させる
-        negative=10
+        **doc2vec_conf,
     )
     print('finish.', file=sys.stderr, flush=True);
-    # for word in ["ショッピング", "サスペンス", "WEC", "FORMULA", "EWC"]:
-    #     if word in d2v_model.wv:
-    #         similars = d2v_model.wv.most_similar(word, topn=5)
-    #         for t, score in similars:
-    #             print(f"{word} {t}: {score:.4f}")
-    #     else:
-    #         print(f"'{word}' is NOT in the vocabulary.")
 
-    X_train = []
-    y_train = []
-    
     print('make classifier...', end='', file=sys.stderr, flush=True)
+    X_all = []
+    y_all = []
     for pg in pgs:
-        if pg['tuner'] != 'x' and not (stations.get(pg['tuner'],{}).get(pg['station_id'])):
+        if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
             continue
-        if pg.get('interaction') and pg['interaction'] in ['p','n']:
-            if len(pg['ws1'])>0:
-                vec = d2v_model.dv[f"{pg['uniqk']}:title"]
-                X_train.append(vec)
-                y_train.append(1 if pg['interaction']=='p' else 0)
-            if len(pg['ws2'])>0:
-                vec = d2v_model.dv[f"{pg['uniqk']}:detail"]
-                X_train.append(vec)
-                y_train.append(1 if pg['interaction']=='p' else 0)
-            if len(pg['ws'])>0:
-                vec = d2v_model.dv[f"{pg['uniqk']}:all"]
-                X_train.append(vec)
-                y_train.append(1 if pg['interaction']=='p' else 0)
+        if pg.get('interaction', '_') not in ['p','n']:
+            continue
+        if len(pg['ws'])>0:
+            vec = d2v_model.dv[pg['uniqk']]
+            X_all.append(vec)
+            y_all.append(1 if pg['interaction']=='p' else 0)
     
-    # base_svc = SVC(kernel='rbf', C=0.3, gamma=0.02, class_weight='balanced', random_state=43)
-    # classifier = CalibratedClassifierCV(estimator=base_svc, ensemble=False)
-    
-    #classes = np.unique(y_train)
-    X_train_arr = np.array(X_train)
-    y_train_arr = np.array(y_train)
-    pos_count = np.sum(y_train_arr == 1)
-    neg_count = np.sum(y_train_arr == 0)
+    X_all_nparr = np.array(X_all)
+    y_all_nparr = np.array(y_all)
+
+    # データを訓練用8割、テスト用2割に分割
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X_all_nparr, y_all_nparr, test_size=0.2, random_state=43, stratify=y_all_nparr
+    )
+
+    pos_count = np.sum(y_tr == 1)
+    neg_count = np.sum(y_tr == 0)
     xgb_scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1
-    xgb_device = get_cpu_or_gpu()
-    xgb_n_jobs = -1 if xgb_device=='cpu' else None
-    print(pos_count, neg_count, xgb_scale_pos_weight, xgb_device, xgb_n_jobs)
+    xgb_conf = model_conf.get('xgboost',{})
     base_xgb = xgb.XGBClassifier(
-      tree_method='hist',
-      device=xgb_device,
-      n_jobs=xgb_n_jobs,
       scale_pos_weight=xgb_scale_pos_weight,
-      random_state=43,
-      eval_metric='logloss'
+      **xgb_conf
     )
     classifier = CalibratedClassifierCV(estimator=base_xgb, ensemble=False)
-    classifier.fit(X_train_arr, y_train_arr)
+    classifier.fit(X_tr, y_tr)
     print('finish.', file=sys.stderr, flush=True);
+
+    # 学習に使っていない「テストデータ」で予測・評価
+    y_te_probs = classifier.predict_proba(X_te)[:, 1]
+    y_te_preds = classifier.predict(X_te)
+    print("=== テストデータでのスコア ===")
+    print(classification_report(y_te, y_te_preds, target_names=["n", "p"]))
+    auc = roc_auc_score(y_te, y_te_probs)
+    print(f"ROC-AUC Score: {auc:.4f}")
+    loss = log_loss(y_te, y_te_probs)
+    print(f"Log Loss: {loss:.4f}")
+
+    fpr, tpr, thresholds = roc_curve(y_te, y_te_probs)
+    plt.clf()  # グラフの初期化
+    plt.plot(fpr, tpr, label="ROC Curve")
+    plt.title("ROC Curve (CUI Plot)")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    # グラフのサイズをターミナルに合わせる設定（お好みで調整）
+    plt.plotsize(60, 60)
+    plt.show()
+
+    def pg_filtered(pgs):
+        for pg in pgs:
+            if pg['is_target']==0 and pg['is_preinstalled']==0:
+                continue
+            yield pg
+
+    def pred1(ws, classifier):
+        vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
+        pred_label = 'p' if classifier.predict(vec)[0] == 1 else 'n'
+        pred_proba = np.max(classifier.predict_proba(vec)[0])
+        return pred_label, pred_proba
+
+    def pred(pg, classifier):
+        pred_label0=None
+        pred_label1=None
+        pred_label2=None
+
+        if len(pg['ws'])>0:
+            pred_label0, pred_proba0 = pred1(pg['ws'], classifier)
+            if pred_label0 and pred_label0 == 'p':
+                return pred_label0, pred_proba0
+
+        if len(pg['ws1'])>0:
+            pred_label1, pred_proba1 = pred1(pg['ws1'], classifier)
+            if pred_label1 and pred_label1 == 'p':
+                return pred_label1, pred_proba1
+
+        if len(pg['ws2'])>0:
+            pred_label2, pred_proba2 = pred1(pg['ws2'], classifier)
+            if pred_label2 and pred_label2 == 'p':
+                return pred_label2, pred_proba2
+
+        if pred_label1 and pred_label0 and pred_label1 == pred_label0:
+            return pred_label1, max(pred_proba1, pred_proba0)
+        elif pred_label2 and pred_label0 and pred_label2 == pred_label0:
+            return pred_label2, max(pred_proba2, pred_proba0)
+        elif pred_label1 and pred_label2 and pred_label1 == pred_label2:
+            return pred_label1, max(pred_proba1, pred_proba2)
+        elif pred_label0:
+            return pred_label0, pred_proba0
+        elif pred_label1:
+            return pred_label1, pred_proba1
+        elif pred_label2:
+            return pred_label2, pred_proba2
+        return None, None
 
     print('make predict...', end='', file=sys.stderr, flush=True)
     connz = sqlite3.connect(db_in_path)
-    connz.row_factory = sqlite3.Row
-    cursorz = connz.cursor()
-
     try:
+        connz.row_factory = sqlite3.Row
+        cursorz = connz.cursor()
         with connz:
-            for pg in pgs:
-                if pg['is_target']==0 and pg['is_preinstalled']==0:
-                    continue
+            for pg in pg_filtered(pgs):
                 is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
-                pred_label1=None
-                pred_label2=None
-                pred_label3=None
-                pred_label=None
-                pred_proba=None
-                if len(pg['ws1'])>0:
-                    vec1 = d2v_model.infer_vector(pg["ws1"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label1 = 'p' if classifier.predict(vec1)[0] == 1 else 'n'
-                    pred_proba1 = np.max(classifier.predict_proba(vec1)[0])
-                if len(pg['ws2'])>0:
-                    vec2 = d2v_model.infer_vector(pg["ws2"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label2 = 'p' if classifier.predict(vec2)[0] == 1 else 'n'
-                    pred_proba2 = np.max(classifier.predict_proba(vec2)[0])
-                if len(pg['ws'])>0:
-                    vec3 = d2v_model.infer_vector(pg["ws"], epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-                    pred_label3 = 'p' if classifier.predict(vec3)[0] == 1 else 'n'
-                    pred_proba3 = np.max(classifier.predict_proba(vec3)[0])
-
-                if pred_label3 and pred_label3 == 'p':
-                    pred_label = pred_label3
-                    pred_proba = pred_proba3
-                elif pred_label1 and pred_label1 == 'p':
-                    pred_label = pred_label1
-                    pred_proba = pred_proba1
-                elif pred_label2 and pred_label2 == 'p':
-                    pred_label = pred_label2
-                    pred_proba = pred_proba2
-                elif pred_label1 and pred_label2 and pred_label1 == pred_label2:
-                    pred_label = pred_label1
-                    pred_proba = max(pred_proba1, pred_proba2)
-                elif pred_label1 and pred_label3 and pred_label1 == pred_label3:
-                    pred_label = pred_label1
-                    pred_proba = max(pred_proba1, pred_proba3)
-                elif pred_label2 and pred_label3 and pred_label2 == pred_label3:
-                    pred_label = pred_label2
-                    pred_proba = max(pred_proba2, pred_proba3)
-                elif pred_label3:
-                    pred_label = pred_label3
-                    pred_proba = pred_proba3
-                elif pred_label1:
-                    pred_label = pred_label1
-                    pred_proba = pred_proba1
-                elif pred_label2:
-                    pred_label = pred_label2
-                    pred_proba = pred_proba2
+                pred_label, pred_proba = pred(pg, classifier)
                 if pred_label and pred_proba:
                     cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pred_label, pred_proba, pg['uniqk']])
                     if (not is_blocked) and pg['is_target'] == 1 and pred_label == 'p':
-                            print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
+                        print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
     print('finish.', file=sys.stderr, flush=True)
