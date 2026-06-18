@@ -39,6 +39,7 @@ def main():
         with open("./static_tokens.yaml") as f:
             static_tokens_conf = yaml.safe_load(f)
         blocklist = [set(b) for b in static_tokens_conf.get('blocklist',[])]
+        stations_arr=[f'{x}:{y}' for x in static_tokens_conf.get('stations',{}).keys() for y in static_tokens_conf['stations'][x] ]
     else:
         blocklist = list()
 
@@ -101,23 +102,16 @@ def main():
     def make_other_feature(pg):
         return [
             scale_duration(pg['duration']),
-            1 if '0' in pg['genre_arr'] else 0,
-            1 if '1' in pg['genre_arr'] else 0,
-            1 if '2' in pg['genre_arr'] else 0,
-            1 if '3' in pg['genre_arr'] else 0,
-            1 if '4' in pg['genre_arr'] else 0,
-            1 if '5' in pg['genre_arr'] else 0,
-            1 if '6' in pg['genre_arr'] else 0,
-            1 if '7' in pg['genre_arr'] else 0,
-            1 if '8' in pg['genre_arr'] else 0,
-            1 if '9' in pg['genre_arr'] else 0,
-            1 if 'A' in pg['genre_arr'] else 0,
-            1 if 'B' in pg['genre_arr'] else 0,
-            1 if 'C' in pg['genre_arr'] else 0,
-            1 if 'D' in pg['genre_arr'] else 0,
-            1 if 'E' in pg['genre_arr'] else 0,
-            1 if 'F' in pg['genre_arr'] else 0,
+            *[ 1 if x in pg['genre_arr'] else 0 for x in list('0123456789ABCDEF')],
+            *[ 1 if x == f"{pg['tuner']}:{pg['station_id']}" else 0 for x in stations_arr],
         ]
+    # xx={
+    #     'duration': 120,
+    #     'genre_arr': ["1","3"],
+    #     'tuner': 'cs',
+    #     'station_id': '309'
+    # }
+    # print(make_other_feature(xx))
 
     X_text = []
     X_others = []
