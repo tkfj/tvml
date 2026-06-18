@@ -115,7 +115,7 @@ with conn:
         INSERT INTO tvml0_db.tvml (
           asof, bsdate, tuner, station_id, pg_start, pg_end, pg_title, pg_detail, interaction, is_target, is_preinstalled
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-      """, ['000000000000', '00000000', f'__{intr}', f'{i:08}', '000000000000', '000000000001', t, '', intr, 0, 1])
+      """, ['000101010000', '00010101', f'__{intr}', f'{i:08}', '000101010000', '000101010001', t, '', intr, 0, 1])
 
 insert_pgm_sql = (
 "INSERT INTO tvml0_db.tvml ("

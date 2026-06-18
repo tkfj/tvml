@@ -8,7 +8,7 @@ doc2vec:
 
 xgboost:
   tree_method: 'hist'
-  device: 'gpu' # cpu or cuda
+  device: 'cuda' # cpu or cuda
   n_jobs: 1    # cpu:-1 cuda:1
   random_state: 42
   max_depth: 4

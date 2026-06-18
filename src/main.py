@@ -47,12 +47,24 @@ def main():
         with open("./model_config.yaml") as f:
             model_conf = yaml.safe_load(f)
 
+    import datetime
+    import math
+
+    def scale_duration(duration):
+        d=min(max(duration,1),180)
+        return math.log(d) / math.log(180)
+
     pgs=[]
     print('reading program data...', end='', file=sys.stderr, flush=True);
     for pg in stream_program_data():
         pg['ws1']=list(json.loads(pg["words1"]))
         pg['ws2']=list(json.loads(pg["words2"]))
         pg['ws']=list(itertools.chain(pg["ws1"],pg["ws2"]))
+        pg['duration']=int(
+            (datetime.datetime.strptime(pg['pg_end'],'%Y%m%d%H%M')
+              -datetime.datetime.strptime(pg['pg_start'],'%Y%m%d%H%M')
+            ).total_seconds() // 60)
+        pg['genre_arr']=pg['genre'].split(',') if pg['genre'] else []
         pgs.append(pg)
         # print(pg)
     print('finish.', file=sys.stderr, flush=True);
@@ -77,19 +89,49 @@ def main():
     print('finish.', file=sys.stderr, flush=True);
 
     print('make classifier...', end='', file=sys.stderr, flush=True)
-    X_all = []
+    def pg_filter4classifier(pgs):
+        for pg in pgs:
+            if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
+                continue
+            if pg.get('interaction', '_') not in ['p','n']:
+                continue
+            if len(pg['ws'])<=0:
+                continue
+            yield pg
+    def make_other_feature(pg):
+        return [
+            scale_duration(pg['duration']),
+            1 if '0' in pg['genre_arr'] else 0,
+            1 if '1' in pg['genre_arr'] else 0,
+            1 if '2' in pg['genre_arr'] else 0,
+            1 if '3' in pg['genre_arr'] else 0,
+            1 if '4' in pg['genre_arr'] else 0,
+            1 if '5' in pg['genre_arr'] else 0,
+            1 if '6' in pg['genre_arr'] else 0,
+            1 if '7' in pg['genre_arr'] else 0,
+            1 if '8' in pg['genre_arr'] else 0,
+            1 if '9' in pg['genre_arr'] else 0,
+            1 if 'A' in pg['genre_arr'] else 0,
+            1 if 'B' in pg['genre_arr'] else 0,
+            1 if 'C' in pg['genre_arr'] else 0,
+            1 if 'D' in pg['genre_arr'] else 0,
+            1 if 'E' in pg['genre_arr'] else 0,
+            1 if 'F' in pg['genre_arr'] else 0,
+        ]
+
+    X_text = []
+    X_others = []
     y_all = []
-    for pg in pgs:
-        if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
-            continue
-        if pg.get('interaction', '_') not in ['p','n']:
-            continue
-        if len(pg['ws'])>0:
-            vec = d2v_model.dv[pg['uniqk']]
-            X_all.append(vec)
-            y_all.append(1 if pg['interaction']=='p' else 0)
+    for pg in pg_filter4classifier(pgs):
+        vec = d2v_model.dv[pg['uniqk']]
+        X_text.append(vec)
+        X_others.append(make_other_feature(pg))
+        y_all.append(1 if pg['interaction']=='p' else 0)
     
-    X_all_nparr = np.array(X_all)
+    X_all_nparr = np.hstack((
+        np.array(X_text),
+        np.array(X_others),
+    ))
     y_all_nparr = np.array(y_all)
 
     # データを訓練用8割、テスト用2割に分割
@@ -135,10 +177,12 @@ def main():
                 continue
             yield pg
 
-    def pred1(ws, classifier):
+    def pred1(ws, pg, classifier):
         vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-        pred_label = 'p' if classifier.predict(vec)[0] == 1 else 'n'
-        pred_proba = np.max(classifier.predict_proba(vec)[0])
+        others = np.array(make_other_feature(pg)).reshape(1, -1)
+        vec_join = np.hstack((vec, others,))
+        pred_label = 'p' if classifier.predict(vec_join)[0] == 1 else 'n'
+        pred_proba = np.max(classifier.predict_proba(vec_join)[0])
         return pred_label, pred_proba
 
     def pred(pg, classifier):
@@ -147,17 +191,17 @@ def main():
         pred_label2=None
 
         if len(pg['ws'])>0:
-            pred_label0, pred_proba0 = pred1(pg['ws'], classifier)
+            pred_label0, pred_proba0 = pred1(pg['ws'], pg, classifier)
             if pred_label0 and pred_label0 == 'p':
                 return pred_label0, pred_proba0
 
         if len(pg['ws1'])>0:
-            pred_label1, pred_proba1 = pred1(pg['ws1'], classifier)
+            pred_label1, pred_proba1 = pred1(pg['ws1'], pg, classifier)
             if pred_label1 and pred_label1 == 'p':
                 return pred_label1, pred_proba1
 
         if len(pg['ws2'])>0:
-            pred_label2, pred_proba2 = pred1(pg['ws2'], classifier)
+            pred_label2, pred_proba2 = pred1(pg['ws2'], pg, classifier)
             if pred_label2 and pred_label2 == 'p':
                 return pred_label2, pred_proba2
 
