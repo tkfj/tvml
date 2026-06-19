@@ -147,29 +147,18 @@ tvpgm_latest AS (
 tvlike_rank AS (
   SELECT
   *,
-  SUBSTR( -- MAXで選ばれた「最新日付_文字列」から、後ろの文字列部分だけを切り出す
-    MAX(-- 窓関数のMAXにより、非NULLの中で「最新のasof（辞書順で最大）」の結合文字列が選ばれる
-      CASE WHEN interaction IS NOT NULL THEN asof || '_' || interaction END
-    ) OVER (
-      PARTITION BY bsdate, tuner, station_id, pg_start, pg_end, pg_title -- 変化なしとみなす条件
-      ORDER BY asof DESC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ),
-    -- 切り出し開始位置：asofの文字数 + 2文字目（アンダースコアの次）から
-    LENGTH(asof) + 2
-  ) AS interaction_uq,
-  DENSE_RANK() OVER(PARTITION BY bsdate ORDER BY asof DESC) AS asof_rk
+  DENSE_RANK() OVER(PARTITION BY bsdate, tuner, station_id, pg_start, pg_end, pg_title ORDER BY asof DESC) AS pgm_rk
   FROM tvlike_db.interactions
 ),
 tvlike_latest AS (
   SELECT
   *
   FROM tvlike_rank
-  WHERE asof_rk = 1
+  WHERE pgm_rk = 1
 ),
 tvml_base AS (
   SELECT
-  p.*,COALESCE(l.interaction_uq,'_') AS interaction
+  p.*,COALESCE(l.interaction,'_') AS interaction
   FROM tvpgm_latest AS p
   LEFT OUTER JOIN tvlike_latest AS l
   ON ( -- 変化なしとみなす条件
@@ -200,9 +189,10 @@ def fetch_tvml0():
   finally:
     cursor_sel.close()
 
+from tqdm import tqdm
 
 with conn:
-  for row in fetch_tvml0():
+  for row in tqdm(fetch_tvml0()):
     cursor.execute(
       "select * from tvml_db.tvml where bsdate=? and tuner=? and station_id=? and pg_start=? and pg_title=? and pg_detail=? limit 1"
       ,[row['bsdate'],row['tuner'],row['station_id'],row['pg_start'],row['pg_title'],row['pg_detail'],]

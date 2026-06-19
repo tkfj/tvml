@@ -215,11 +215,12 @@ def main():
 
     print('make predict...', end='', file=sys.stderr, flush=True)
     connz = sqlite3.connect(db_in_path)
+    from tqdm import tqdm
     try:
         connz.row_factory = sqlite3.Row
         cursorz = connz.cursor()
         with connz:
-            for pg in pg_filtered(pgs):
+            for pg in tqdm(pg_filtered(pgs)):
                 is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
                 pred_label, pred_proba = pred(pg, classifier)
                 if pred_label and pred_proba:
