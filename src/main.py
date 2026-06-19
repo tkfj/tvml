@@ -16,7 +16,6 @@ from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
 from sklearn.metrics import roc_curve
-from sklearn.model_selection import KFold
 from sklearn.preprocessing import TargetEncoder
 
 
@@ -122,8 +121,8 @@ def main():
         df = pd.DataFrame(nparr)
         num_cols = df.shape[1]
         df = df.rename(columns={num_cols - 2: 'genre_id', num_cols - 1: 'station_id'})
-        df['genre_id'] = df['genre_id'] # .astype(int).astype('category')
-        df['station_id'] = df['station_id'] # astype(int).astype('category')
+        df['genre_id'] = df['genre_id'].astype(int).astype('category')
+        df['station_id'] = df['station_id'].astype(int).astype('category')
         return df
 
 
@@ -148,38 +147,6 @@ def main():
     X_tr, X_te, y_tr, y_te = train_test_split(
         X_all_pd, y_all_nparr, test_size=0.2, random_state=43, stratify=y_all_nparr
     )
-
-    # ==========================================
-    # 2. 【ここから追加】 Target Encoding の処理
-    # ==========================================
-    
-    # カテゴリ変数が格納されている「後ろの2列」の列名を特定
-    # (to_X_pd_from_np の実装によりますが、列名が未指定ならインデックス番号になります)
-    # 128次元 + 番組長(1) の次なので、129番目と130番目の列
-    num_cols = X_tr.shape[1]
-    cat_cols = ['genre_id', 'station_id'] # [129, 130] 相当
-    
-    # 厳密に整数型（int）としてエンコーダーに渡すためにキャスト
-    X_tr_cat = X_tr[cat_cols].astype(int)
-    X_te_cat = X_te[cat_cols].astype(int)
-    
-    # エンコーダーの初期化（5-fold CVで身内カンニングを徹底防御）
-    cv_strategy = KFold(n_splits=5, shuffle=True, random_state=42)
-    encoder = TargetEncoder(smooth="auto", cv=cv_strategy)
-    
-    # 訓練データの「y_tr（勝率）」を使ってエンコーディング（型作り ＋ 変換）
-    X_tr_encoded = encoder.fit_transform(X_tr_cat, y_tr)
-    
-    # テストデータは、訓練データで作った型を元に「ただ変換するだけ」（y_teは絶対に見せない）
-    X_te_encoded = encoder.transform(X_te_cat)
-    
-    # 元の DataFrame のカテゴリ列（整数型だった列）を、変換後のクリーンな数値（float）で上書き
-    X_tr[cat_cols] = X_tr_encoded
-    X_te[cat_cols] = X_te_encoded
-
-    # ==========================================
-    # これで X_tr, X_te の全列が完全な「数値（float）」になりました！
-    # ==========================================
 
     pos_count = np.sum(y_tr == 1)
     neg_count = np.sum(y_tr == 0)
