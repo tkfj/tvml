@@ -153,12 +153,11 @@ def main():
     neg_count = np.sum(y_tr == 0)
     xgb_scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1
     xgb_conf = model_conf.get('xgboost',{})
-    base_xgb = xgb.XGBClassifier(
+    classifier = xgb.XGBClassifier(
       scale_pos_weight=xgb_scale_pos_weight,
       enable_categorical=True,
       **xgb_conf
     )
-    classifier = CalibratedClassifierCV(estimator=base_xgb, ensemble=False)
     classifier.fit(X_tr, y_tr)
     print('finish.', file=sys.stderr, flush=True);
 
