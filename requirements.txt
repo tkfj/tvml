@@ -1,6 +1,7 @@
 requests
 gensim #word2vec
 scikit-learn
+pandas
 PyYAML
 xgboost
 plotext

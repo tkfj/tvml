@@ -1,11 +1,14 @@
 import json
 import sqlite3
 import itertools
+import datetime
+import math
 import os
 import sys
 import yaml
 import xgboost as xgb
 import numpy as np
+import pandas as pd
 import plotext as plt
 
 from typing import Iterator, Dict
@@ -47,9 +50,6 @@ def main():
     if os.path.isfile("./model_config.yaml"):
         with open("./model_config.yaml") as f:
             model_conf = yaml.safe_load(f)
-
-    import datetime
-    import math
 
     def scale_duration(duration):
         d=min(max(duration,1),180)
@@ -100,18 +100,32 @@ def main():
                 continue
             yield pg
     def make_other_feature(pg):
+        assert len(pg['genre_arr'])<=1, "複数ジャンルには対応していません。"
+        _st=f"{pg['tuner']}:{pg['station_id']}"
         return [
             scale_duration(pg['duration']),
-            *[ 1 if x in pg['genre_arr'] else 0 for x in list('0123456789ABCDEF')],
-            *[ 1 if x == f"{pg['tuner']}:{pg['station_id']}" else 0 for x in stations_arr],
+            int(pg['genre_arr'][0],16) if pg['genre_arr'] else 99,
+            stations_arr.index(_st) if _st in stations_arr else 999,
+            # *[ 1 if x in pg['genre_arr'] else 0 for x in list('0123456789ABCDEF')],
+            # *[ 1 if x == f"{pg['tuner']}:{pg['station_id']}" else 0 for x in stations_arr],
         ]
     # xx={
     #     'duration': 120,
-    #     'genre_arr': ["1","3"],
+    #     'genre_arr': ["F"],
     #     'tuner': 'cs',
     #     'station_id': '309'
     # }
     # print(make_other_feature(xx))
+
+
+    def to_X_pd_from_np(nparr):
+        df = pd.DataFrame(nparr)
+        num_cols = df.shape[1]
+        df = df.rename(columns={num_cols - 2: 'genre_id', num_cols - 1: 'station_id'})
+        df['genre_id'] = df['genre_id'].astype(int).astype('category')
+        df['station_id'] = df['station_id'].astype(int).astype('category')
+        return df
+
 
     X_text = []
     X_others = []
@@ -128,9 +142,11 @@ def main():
     ))
     y_all_nparr = np.array(y_all)
 
+    X_all_pd = to_X_pd_from_np(X_all_nparr)
+
     # データを訓練用8割、テスト用2割に分割
     X_tr, X_te, y_tr, y_te = train_test_split(
-        X_all_nparr, y_all_nparr, test_size=0.2, random_state=43, stratify=y_all_nparr
+        X_all_pd, y_all_nparr, test_size=0.2, random_state=43, stratify=y_all_nparr
     )
 
     pos_count = np.sum(y_tr == 1)
@@ -139,6 +155,7 @@ def main():
     xgb_conf = model_conf.get('xgboost',{})
     base_xgb = xgb.XGBClassifier(
       scale_pos_weight=xgb_scale_pos_weight,
+      enable_categorical=True,
       **xgb_conf
     )
     classifier = CalibratedClassifierCV(estimator=base_xgb, ensemble=False)
@@ -175,8 +192,9 @@ def main():
         vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
         others = np.array(make_other_feature(pg)).reshape(1, -1)
         vec_join = np.hstack((vec, others,))
-        pred_label = 'p' if classifier.predict(vec_join)[0] == 1 else 'n'
-        pred_proba = np.max(classifier.predict_proba(vec_join)[0])
+        df = to_X_pd_from_np(vec_join)
+        pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
+        pred_proba = np.max(classifier.predict_proba(df)[0])
         return pred_label, pred_proba
 
     def pred(pg, classifier):
