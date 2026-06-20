@@ -124,6 +124,8 @@ def main():
         df = pd.DataFrame(nparr)
         num_cols = df.shape[1]
         df = df.rename(columns={num_cols - 2: 'genre_cat', num_cols - 1: 'station_cat'})
+        # df = df.rename(columns={num_cols - 1: 'genre_cat'})
+        # df = df.rename(columns={num_cols - 1: 'station_cat'})
         df['genre_cat'] = df['genre_cat'].astype(int) #.astype('category')
         df['station_cat'] = df['station_cat'].astype(int) #.astype('category')
         return df
@@ -195,8 +197,9 @@ def main():
         others = np.array(make_other_feature(pg)).reshape(1, -1)
         vec_join = np.hstack((vec, others,))
         df = to_X_pd_from_np(vec_join)
-        pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
+        # pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
         pred_proba = float(classifier.predict_proba(df)[0][1])
+        pred_label = 'p' if pred_proba >= 0.5 else 'n'
         return pred_label, pred_proba
 
     def pred(pg, classifier):
