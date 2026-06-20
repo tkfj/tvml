@@ -1,6 +1,5 @@
 #FROM python:3.11-slim-bookworm
-FROM nvcr.io/nvidia/pytorch:23.10-py3
-
+FROM nvcr.io/nvidia/pytorch:26.05-py3
 
 # タイムゾーンと最小限のパッケージ
 ENV TZ=Asia/Tokyo
