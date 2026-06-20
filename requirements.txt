@@ -6,3 +6,4 @@ PyYAML
 xgboost>=2.1.4
 plotext
 cython
+tqdm
