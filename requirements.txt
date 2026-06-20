@@ -7,3 +7,8 @@ xgboost>=2.1.4
 plotext
 cython
 tqdm
+transformers
+torch --index-url https://download.pytorch.org/whl/cu121
+fugashi
+unidic-lite
+faust-cchardet

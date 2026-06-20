@@ -10,12 +10,16 @@ import xgboost as xgb
 import numpy as np
 import pandas as pd
 import plotext as plt
+from tqdm import tqdm
 
 from typing import Iterator, Dict
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
 from sklearn.metrics import roc_curve
+from transformers import AutoTokenizer, AutoModel
+from sklearn.decomposition import PCA
+import torch
 
 db_in_path = "./db/tvml0.db"
 db_out_path = "./db/tvml.db"
@@ -70,7 +74,7 @@ def main():
         pg['genre_arr']=pg['genre'].split(',') if pg['genre'] else []
         pgs.append(pg)
         # print(pg)
-    print('finish.', file=sys.stderr, flush=True);
+    print('finish.', file=sys.stderr, flush=True)
 
     print('create tags...', end='', file=sys.stderr, flush=True)
     tagged_data = list(itertools.chain([
@@ -80,20 +84,22 @@ def main():
         )
         for pg in pgs if len(pg['ws'])>0
     ]))
-    print('finish.', file=sys.stderr, flush=True);
+    print('finish.', file=sys.stderr, flush=True)
 
-    print('doc2vec...', end='', file=sys.stderr, flush=True);
+    print('doc2vec...', end='', file=sys.stderr, flush=True)
     doc2vec_conf = model_conf.get('doc2vec',{})
     doc2vec_conf['workers'] = max(os.cpu_count(),10) if doc2vec_conf.get('workers',-1)<0 else 3
     d2v_model = Doc2Vec(
         documents=tagged_data,
         **doc2vec_conf,
     )
-    print('finish.', file=sys.stderr, flush=True);
+    print('finish.', file=sys.stderr, flush=True)
 
     print('make classifier...', end='', file=sys.stderr, flush=True)
     def pg_filter4classifier(pgs):
-        for pg in pgs:
+        for i, pg in enumerate(pgs):
+            if i > 1000:
+                break
             if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
                 continue
             if pg.get('interaction', '_') not in ['p','n']:
@@ -133,8 +139,20 @@ def main():
     X_text = []
     X_others = []
     y_all = []
-    for pg in pg_filter4classifier(pgs):
-        vec = d2v_model.dv[pg['uniqk']]
+    device='cpu'
+    tokenizer = AutoTokenizer.from_pretrained("cl-tohoku/bert-base-japanese-v3")
+    model = AutoModel.from_pretrained("cl-tohoku/bert-base-japanese-v3").to(device)
+    # (これは学習データのBERTベクトル全体で一度 fit_transform しておく)
+    # pca = PCA(n_components=128) 
+    # X_tr_bert_128d = pca.fit_transform(X_tr_bert_768d)
+    for pg in tqdm(pg_filter4classifier(pgs)):
+        inputs = tokenizer(f"{pg['pg_title']} {pg['pg_detail']}", return_tensors='pt', padding=True, truncation=True).to(device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            vec = outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+        # print("ベクトルの形状:", vec.shape)  # ➔ (768,)
+        # print("正常にCPUでベクトル化できました！")
+        # vec = d2v_model.dv[pg['uniqk']]
         X_text.append(vec)
         X_others.append(make_other_feature(pg))
         y_all.append(1 if pg['interaction']=='p' else 0)
@@ -193,7 +211,11 @@ def main():
             yield pg
 
     def pred1(ws, pg, classifier):
-        vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
+        inputs = tokenizer(ws, return_tensors='pt', padding=True, truncation=True).to(device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            vec = outputs.last_hidden_state.mean(dim=1).squeeze().numpy().reshape(1, -1)
+        # vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
         others = np.array(make_other_feature(pg)).reshape(1, -1)
         vec_join = np.hstack((vec, others,))
         df = to_X_pd_from_np(vec_join)
@@ -208,17 +230,17 @@ def main():
         pred_label2=None
 
         if len(pg['ws'])>0:
-            pred_label0, pred_proba0 = pred1(pg['ws'], pg, classifier)
+            pred_label0, pred_proba0 = pred1(f"{pg['pg_title']} {pg['pg_detail']}", pg, classifier)
             if pred_label0 and pred_label0 == 'p':
                 return pred_label0, pred_proba0
 
         if len(pg['ws1'])>0:
-            pred_label1, pred_proba1 = pred1(pg['ws1'], pg, classifier)
+            pred_label1, pred_proba1 = pred1(pg['pg_title'], pg, classifier)
             if pred_label1 and pred_label1 == 'p':
                 return pred_label1, pred_proba1
 
         if len(pg['ws2'])>0:
-            pred_label2, pred_proba2 = pred1(pg['ws2'], pg, classifier)
+            pred_label2, pred_proba2 = pred1(pg['pg_detail'], pg, classifier)
             if pred_label2 and pred_label2 == 'p':
                 return pred_label2, pred_proba2
 
@@ -238,7 +260,6 @@ def main():
 
     print('make predict...', end='', file=sys.stderr, flush=True)
     connz = sqlite3.connect(db_in_path)
-    from tqdm import tqdm
     try:
         connz.row_factory = sqlite3.Row
         cursorz = connz.cursor()
