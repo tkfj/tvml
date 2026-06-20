@@ -196,7 +196,7 @@ def main():
         vec_join = np.hstack((vec, others,))
         df = to_X_pd_from_np(vec_join)
         pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
-        pred_proba = float(np.max(classifier.predict_proba(df)[0]))
+        pred_proba = float(classifier.predict_proba(df)[0][1])
         return pred_label, pred_proba
 
     def pred(pg, classifier):
