@@ -16,8 +16,6 @@ from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
 from sklearn.metrics import roc_curve
-from sklearn.preprocessing import TargetEncoder
-
 
 db_in_path = "./db/tvml0.db"
 db_out_path = "./db/tvml.db"
@@ -30,7 +28,12 @@ def stream_program_data() -> Iterator[Dict]:
     try:
         conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tvml")
+        cursor.execute("""
+SELECT *
+, MAX(asof) OVER() AS asof_max
+FROM tvml
+
+        """)
         for row in cursor:
             yield dict(row)
     finally:
@@ -125,7 +128,6 @@ def main():
         df['station_id'] = df['station_id'].astype(int).astype('category')
         return df
 
-
     X_text = []
     X_others = []
     y_all = []
@@ -183,6 +185,8 @@ def main():
     def pg_filtered(pgs):
         for pg in pgs:
             if pg['is_target']==0 and pg['is_preinstalled']==0:
+                continue
+            if pg['asof']!=pg['asof_max']:
                 continue
             yield pg
 
