@@ -123,9 +123,9 @@ def main():
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
         num_cols = df.shape[1]
-        df = df.rename(columns={num_cols - 2: 'genre_id', num_cols - 1: 'station_id'})
-        df['genre_id'] = df['genre_id'].astype(int).astype('category')
-        df['station_id'] = df['station_id'].astype(int).astype('category')
+        df = df.rename(columns={num_cols - 2: 'genre_cat', num_cols - 1: 'station_cat'})
+        df['genre_cat'] = df['genre_cat'].astype(int) #.astype('category')
+        df['station_cat'] = df['station_cat'].astype(int) #.astype('category')
         return df
 
     X_text = []
@@ -196,7 +196,7 @@ def main():
         vec_join = np.hstack((vec, others,))
         df = to_X_pd_from_np(vec_join)
         pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
-        pred_proba = np.max(classifier.predict_proba(df)[0])
+        pred_proba = float(np.max(classifier.predict_proba(df)[0]))
         return pred_label, pred_proba
 
     def pred(pg, classifier):
