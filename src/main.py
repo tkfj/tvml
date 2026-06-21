@@ -56,6 +56,7 @@ def main():
     if os.path.isfile("./model_config.yaml"):
         with open("./model_config.yaml") as f:
             model_conf = yaml.safe_load(f)
+    print(model_conf)
 
     def scale_duration(duration):
         d=min(max(duration,1),180)

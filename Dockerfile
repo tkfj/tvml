@@ -22,6 +22,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt --break-system-pack
 # ソースコードのコピー
 COPY ./src ./src
 COPY static_tokens.yaml static_tokens.yaml
+COPY model_config.yaml model_config.yaml
 
 # 本番実行用コマンド
 CMD ["python", "src/main.py"]
