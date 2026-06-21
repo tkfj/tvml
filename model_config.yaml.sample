@@ -1,4 +1,5 @@
 # _dev_train_max_size: 1000
+# _dev_predict_max_size: 1000
 transformers_tokenizer: 'cl-tohoku/bert-base-japanese-v3'
 transformers_tokenizer_batch_size: 512
 transformers_model: 'cl-tohoku/bert-base-japanese-v3'

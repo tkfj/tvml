@@ -13,7 +13,6 @@ import plotext as plt
 from tqdm import tqdm
 
 from typing import Iterator, Dict
-from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
 from sklearn.metrics import roc_curve
@@ -36,7 +35,6 @@ def stream_program_data() -> Iterator[Dict]:
 SELECT *
 , MAX(asof) OVER() AS asof_max
 FROM tvml
-
         """)
         for row in cursor:
             yield dict(row)
@@ -77,30 +75,12 @@ def main():
         # print(pg)
     print('finish.', file=sys.stderr, flush=True)
 
-    # print('create tags...', end='', file=sys.stderr, flush=True)
-    # tagged_data = list(itertools.chain([
-    #     TaggedDocument(
-    #         words=pg['ws'],
-    #         tags=[pg['uniqk']]
-    #     )
-    #     for pg in pgs if len(pg['ws'])>0
-    # ]))
-    # print('finish.', file=sys.stderr, flush=True)
-
-    # print('doc2vec...', end='', file=sys.stderr, flush=True)
-    # doc2vec_conf = model_conf.get('doc2vec',{})
-    # doc2vec_conf['workers'] = max(os.cpu_count(),10) if doc2vec_conf.get('workers',-1)<0 else 3
-    # d2v_model = Doc2Vec(
-    #     documents=tagged_data,
-    #     **doc2vec_conf,
-    # )
-    # print('finish.', file=sys.stderr, flush=True)
-
     print('make classifier...', end='', file=sys.stderr, flush=True)
     def pg_filter4classifier(pgs):
-        for i, pg in enumerate(pgs):
+        i=0
+        for pg in pgs:
             if model_conf.get('_dev_train_max_size',-1)>0:
-                if i > model_conf['_dev_train_max_size']:
+                if i >= model_conf['_dev_train_max_size']:
                     break
             if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
                 continue
@@ -108,6 +88,7 @@ def main():
                 continue
             if len(pg['ws'])<=0:
                 continue
+            i+=1
             yield pg
     def make_other_feature(pg):
         assert len(pg['genre_arr'])<=1, "複数ジャンルには対応していません。"
@@ -116,17 +97,7 @@ def main():
             scale_duration(pg['duration']),
             int(pg['genre_arr'][0],16) if pg['genre_arr'] else 99,
             stations_arr.index(_st) if _st in stations_arr else 999,
-            # *[ 1 if x in pg['genre_arr'] else 0 for x in list('0123456789ABCDEF')],
-            # *[ 1 if x == f"{pg['tuner']}:{pg['station_id']}" else 0 for x in stations_arr],
         ]
-    # xx={
-    #     'duration': 120,
-    #     'genre_arr': ["F"],
-    #     'tuner': 'cs',
-    #     'station_id': '309'
-    # }
-    # print(make_other_feature(xx))
-
 
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
@@ -150,7 +121,7 @@ def main():
 
     def batch_vectorise(texts, batch_size=512):
         vectors = []
-        for i in range(0, len(texts), batch_size):
+        for i in tqdm(range(0, len(texts), batch_size)):
             batch_texts = texts[i:i + batch_size]
             
             inputs = tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True).to(device)
@@ -214,11 +185,16 @@ def main():
     plt.show()
 
     def pg_filtered(pgs):
+        i=0
         for pg in pgs:
+            if model_conf.get('_dev_predict_max_size',-1)>0:
+                if i >= model_conf['_dev_predict_max_size']:
+                    break
             if pg['is_target']==0 and pg['is_preinstalled']==0:
                 continue
             if pg['asof']!=pg['asof_max']:
                 continue
+            i+=1
             yield pg
 
     def pred1(ws, pg, classifier):

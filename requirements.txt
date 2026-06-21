@@ -1,5 +1,4 @@
 requests
-gensim #word2vec
 scikit-learn>=1.9.0
 pandas
 PyYAML
