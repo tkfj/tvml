@@ -76,30 +76,31 @@ def main():
         # print(pg)
     print('finish.', file=sys.stderr, flush=True)
 
-    print('create tags...', end='', file=sys.stderr, flush=True)
-    tagged_data = list(itertools.chain([
-        TaggedDocument(
-            words=pg['ws'],
-            tags=[pg['uniqk']]
-        )
-        for pg in pgs if len(pg['ws'])>0
-    ]))
-    print('finish.', file=sys.stderr, flush=True)
+    # print('create tags...', end='', file=sys.stderr, flush=True)
+    # tagged_data = list(itertools.chain([
+    #     TaggedDocument(
+    #         words=pg['ws'],
+    #         tags=[pg['uniqk']]
+    #     )
+    #     for pg in pgs if len(pg['ws'])>0
+    # ]))
+    # print('finish.', file=sys.stderr, flush=True)
 
-    print('doc2vec...', end='', file=sys.stderr, flush=True)
-    doc2vec_conf = model_conf.get('doc2vec',{})
-    doc2vec_conf['workers'] = max(os.cpu_count(),10) if doc2vec_conf.get('workers',-1)<0 else 3
-    d2v_model = Doc2Vec(
-        documents=tagged_data,
-        **doc2vec_conf,
-    )
-    print('finish.', file=sys.stderr, flush=True)
+    # print('doc2vec...', end='', file=sys.stderr, flush=True)
+    # doc2vec_conf = model_conf.get('doc2vec',{})
+    # doc2vec_conf['workers'] = max(os.cpu_count(),10) if doc2vec_conf.get('workers',-1)<0 else 3
+    # d2v_model = Doc2Vec(
+    #     documents=tagged_data,
+    #     **doc2vec_conf,
+    # )
+    # print('finish.', file=sys.stderr, flush=True)
 
     print('make classifier...', end='', file=sys.stderr, flush=True)
     def pg_filter4classifier(pgs):
         for i, pg in enumerate(pgs):
-            # if i > 1000:
-            #     break
+            if model_conf.get('_dev_train_max_size',-1)>0:
+                if i > model_conf['_dev_train_max_size']:
+                    break
             if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
                 continue
             if pg.get('interaction', '_') not in ['p','n']:
@@ -136,28 +137,35 @@ def main():
         df['station_cat'] = df['station_cat'].astype(int) #.astype('category')
         return df
 
+    text_full = []
     X_text_full = []
     X_others = []
     y_all = []
-    device='cuda'
-    tokenizer = AutoTokenizer.from_pretrained("cl-tohoku/bert-base-japanese-v3")
-    model = AutoModel.from_pretrained("cl-tohoku/bert-base-japanese-v3").to(device)
-    pca = PCA(n_components = 64)
-    # (これは学習データのBERTベクトル全体で一度 fit_transform しておく)
-    # pca = PCA(n_components=128) 
-    # X_tr_bert_128d = pca.fit_transform(X_tr_bert_768d)
-    for pg in tqdm(pg_filter4classifier(pgs)):
-        inputs = tokenizer(f"{pg['pg_title']} {pg['pg_detail']}", return_tensors='pt', padding=True, truncation=True).to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            vec = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-        # print("ベクトルの形状:", vec.shape)  # ➔ (768,)
-        # print("正常にCPUでベクトル化できました！")
-        # vec = d2v_model.dv[pg['uniqk']]
-        X_text_full.append(vec)
+    device=model_conf.get('transformers_model_device')
+    tokenizer = AutoTokenizer.from_pretrained(model_conf.get('transformers_tokenizer'))
+    model = AutoModel.from_pretrained(model_conf.get('transformers_tokenizer')).to(device)
+    pca_conf = model_conf.get('pca',{})
+    pca = PCA(**pca_conf)
+
+    def batch_vectorise(texts, batch_size=512):
+        vectors = []
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            
+            inputs = tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True).to(device)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                # 各バッチの結果 (batch_size, 768) を取得
+                batch_features = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+                vectors.append(batch_features)
+        return np.vstack(vectors)
+
+    for pg in pg_filter4classifier(pgs):
+        text_full.append(f"{pg['pg_title']} {pg['pg_detail']}")
         X_others.append(make_other_feature(pg))
         y_all.append(1 if pg['interaction']=='p' else 0)
     
+    X_text_full = batch_vectorise(text_full, model_conf.get('transformers_tokenizer_batch_size'))
     X_text_128 = pca.fit_transform(X_text_full)
     X_all_nparr = np.hstack((
         np.array(X_text_128),

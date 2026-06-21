@@ -1,15 +1,8 @@
-doc2vec:
-  vector_size: 128
-  dm: 0
-  min_count: 2
-  workers: -1 #-1 ->auto(cpu count, max:10)
-  epochs: 50
-  negative: 10
+# _dev_train_max_size: 1000
+transformers_tokenizer: 'cl-tohoku/bert-base-japanese-v3'
+transformers_tokenizer_batch_size: 512
+transformers_model: 'cl-tohoku/bert-base-japanese-v3'
+transformers_model_device: 'cuda'
 
-xgboost:
-  tree_method: 'hist'
-  device: 'cuda' # cpu or cuda
-  n_jobs: 1    # cpu:-1 cuda:1
-  random_state: 42
-  max_depth: 4
-  eval_metric: 'logloss'
+pca:
+  n_components: 128
