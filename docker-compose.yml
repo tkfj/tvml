@@ -1,5 +1,5 @@
 services:
-  batch-job:
+  app:
     build: .
     volumes:
       - ../tvdb:/app/db

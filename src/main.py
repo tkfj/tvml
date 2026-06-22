@@ -121,10 +121,8 @@ def main():
 
     def batch_vectorise(texts, batch_size=512):
         vectors = []
-        for i in tqdm(range(0, len(texts), batch_size)):
-            batch_texts = texts[i:i + batch_size]
-            
-            inputs = tokenizer(batch_texts, return_tensors="pt", padding=True, truncation=True).to(device)
+        for texts_chunk in itertools.batched(tqdm(texts), batch_size):
+            inputs = tokenizer(texts_chunk, return_tensors="pt", padding=True, truncation=True).to(device)
             with torch.no_grad():
                 outputs = model(**inputs)
                 # 各バッチの結果 (batch_size, 768) を取得
@@ -197,54 +195,54 @@ def main():
             i+=1
             yield pg
 
-    def pred1(ws, pg, classifier):
-        inputs = tokenizer(ws, return_tensors='pt', padding=True, truncation=True).to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            vec = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy().reshape(1, -1)
-            vec = pca.transform(vec)
-        # vec = d2v_model.infer_vector(ws, epochs=100, alpha=0.025, min_alpha=0.001).reshape(1, -1)
-        others = np.array(make_other_feature(pg)).reshape(1, -1)
-        vec_join = np.hstack((vec, others,))
-        df = to_X_pd_from_np(vec_join)
-        # pred_label = 'p' if classifier.predict(df)[0] == 1 else 'n'
-        pred_proba = float(classifier.predict_proba(df)[0][1])
-        pred_label = 'p' if pred_proba >= 0.5 else 'n'
-        return pred_label, pred_proba
+    # def pred1(ws, pg, classifier):
+    #     inputs = tokenizer(ws, return_tensors='pt', padding=True, truncation=True).to(device)
+    #     with torch.no_grad():
+    #         outputs = model(**inputs)
+    #         vec = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy().reshape(1, -1)
+    #         vec = pca.transform(vec)
+    #     others = np.array(make_other_feature(pg))
+    #     vec_join = np.hstack((vec, others,))
+    #     df = to_X_pd_from_np(vec_join.reshape(1, -1))
+    #     pred_proba = float(classifier.predict_proba(df)[0][1])
+    #     pred_label = 'p' if pred_proba >= 0.5 else 'n'
+    #     return pred_label, pred_proba
 
-    def pred(pg, classifier):
-        pred_label0=None
-        pred_label1=None
-        pred_label2=None
+    # def pred(pg, classifier):
+    #     pred_label0=None
+    #     pred_label1=None
+    #     pred_label2=None
 
-        if len(pg['ws'])>0:
-            pred_label0, pred_proba0 = pred1(f"{pg['pg_title']} {pg['pg_detail']}", pg, classifier)
-            if pred_label0 and pred_label0 == 'p':
-                return pred_label0, pred_proba0
+    #     if len(pg['ws'])>0:
+    #         pred_label0, pred_proba0 = pred1(f"{pg['pg_title']} {pg['pg_detail']}", pg, classifier)
+    #         if pred_label0 and pred_label0 == 'p':
+    #             return pred_label0, pred_proba0
 
-        if len(pg['ws1'])>0:
-            pred_label1, pred_proba1 = pred1(pg['pg_title'], pg, classifier)
-            if pred_label1 and pred_label1 == 'p':
-                return pred_label1, pred_proba1
+    #     if len(pg['ws1'])>0:
+    #         pred_label1, pred_proba1 = pred1(pg['pg_title'], pg, classifier)
+    #         if pred_label1 and pred_label1 == 'p':
+    #             return pred_label1, pred_proba1
 
-        if len(pg['ws2'])>0:
-            pred_label2, pred_proba2 = pred1(pg['pg_detail'], pg, classifier)
-            if pred_label2 and pred_label2 == 'p':
-                return pred_label2, pred_proba2
+    #     if len(pg['ws2'])>0:
+    #         pred_label2, pred_proba2 = pred1(pg['pg_detail'], pg, classifier)
+    #         if pred_label2 and pred_label2 == 'p':
+    #             return pred_label2, pred_proba2
 
-        if pred_label1 and pred_label0 and pred_label1 == pred_label0:
-            return pred_label1, max(pred_proba1, pred_proba0)
-        elif pred_label2 and pred_label0 and pred_label2 == pred_label0:
-            return pred_label2, max(pred_proba2, pred_proba0)
-        elif pred_label1 and pred_label2 and pred_label1 == pred_label2:
-            return pred_label1, max(pred_proba1, pred_proba2)
-        elif pred_label0:
-            return pred_label0, pred_proba0
-        elif pred_label1:
-            return pred_label1, pred_proba1
-        elif pred_label2:
-            return pred_label2, pred_proba2
-        return None, None
+    #     if pred_label1 and pred_label0 and pred_label1 == pred_label0:
+    #         return pred_label1, max(pred_proba1, pred_proba0)
+    #     elif pred_label2 and pred_label0 and pred_label2 == pred_label0:
+    #         return pred_label2, max(pred_proba2, pred_proba0)
+    #     elif pred_label1 and pred_label2 and pred_label1 == pred_label2:
+    #         return pred_label1, max(pred_proba1, pred_proba2)
+    #     elif pred_label0:
+    #         return pred_label0, pred_proba0
+    #     elif pred_label1:
+    #         return pred_label1, pred_proba1
+    #     elif pred_label2:
+    #         return pred_label2, pred_proba2
+    #     return None, None
+
+    
 
     print('make predict...', end='', file=sys.stderr, flush=True)
     connz = sqlite3.connect(db_in_path)
@@ -252,13 +250,32 @@ def main():
         connz.row_factory = sqlite3.Row
         cursorz = connz.cursor()
         with connz:
-            for pg in tqdm(pg_filtered(pgs)):
-                is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
-                pred_label, pred_proba = pred(pg, classifier)
-                if pred_label and pred_proba:
-                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pred_label, pred_proba, pg['uniqk']])
-                    if (not is_blocked) and pg['is_target'] == 1 and pred_label == 'p':
-                        print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
+            for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), 10):
+                txts = [f'{pg["pg_title"]} {pg["pg_detail"]}' for pg in pgschunk]
+                inputs = tokenizer(txts, return_tensors='pt', padding=True, truncation=True).to(device)
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                    vecs = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
+                    vecs = pca.transform(vecs)
+                for pg,vec in zip(pgschunk, vecs):
+                    pg['vec_ws0'] = vec
+                    pg['vec_meta'] = np.array(make_other_feature(pg))
+                    vec_join = np.hstack((pg['vec_ws0'], pg['vec_meta'],)).reshape(1,-1)
+                    df = to_X_pd_from_np(vec_join)
+                    pred_proba = float(classifier.predict_proba(df)[0][1])
+                    pred_label = 'p' if pred_proba >= 0.5 else 'n'
+                    is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
+                    if pred_label and pred_proba:
+                        cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pred_label, pred_proba, pg['uniqk']])
+                        if (not is_blocked) and pg['is_target'] == 1 and pred_label == 'p':
+                            print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
+            # for pg in tqdm(pg_filtered(pgs)):
+            #     is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
+            #     pred_label, pred_proba = pred(pg, classifier)
+            #     if pred_label and pred_proba:
+            #         cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pred_label, pred_proba, pg['uniqk']])
+            #         if (not is_blocked) and pg['is_target'] == 1 and pred_label == 'p':
+            #             print(f'{pred_label}({pred_proba:.4f}) {pg["pg_title"]} {pg["pg_detail"]}')
     finally:
         connz.close()
     print('finish.', file=sys.stderr, flush=True)
