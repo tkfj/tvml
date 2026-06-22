@@ -250,7 +250,7 @@ def main():
         connz.row_factory = sqlite3.Row
         cursorz = connz.cursor()
         with connz:
-            for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), 10):
+            for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), model_conf.get('transformers_tokenizer_batch_size')):
                 txts = [f'{pg["pg_title"]} {pg["pg_detail"]}' for pg in pgschunk]
                 inputs = tokenizer(txts, return_tensors='pt', padding=True, truncation=True).to(device)
                 with torch.no_grad():
@@ -260,9 +260,10 @@ def main():
                 for pg,vec in zip(pgschunk, vecs):
                     pg['vec_ws0'] = vec
                     pg['vec_meta'] = np.array(make_other_feature(pg))
-                    vec_join = np.hstack((pg['vec_ws0'], pg['vec_meta'],)).reshape(1,-1)
-                    df = to_X_pd_from_np(vec_join)
-                    pred_proba = float(classifier.predict_proba(df)[0][1])
+                vec_join = np.vstack([np.hstack((pg['vec_ws0'], pg['vec_meta'],)) for pg in pgschunk])
+                df = to_X_pd_from_np(vec_join)
+                for i, pg in enumerate(pgschunk):
+                    pred_proba = float(classifier.predict_proba(df)[i][1])
                     pred_label = 'p' if pred_proba >= 0.5 else 'n'
                     is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
                     if pred_label and pred_proba:
