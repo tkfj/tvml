@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 class PrepareCore(ABC):
     def __init__(self):
         self.db_path_intr = "./db/tvlike.db"
-        self.db_path_pgm = "./db/tvguide.db"
+        self.db_path_pgm = "./db/epg.db"
         self.db_path_ml = "./db/tvml.db"
 
         self.MECAB_API_URL = os.getenv("MECAB_API_URL")

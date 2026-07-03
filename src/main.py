@@ -20,7 +20,7 @@ from transformers import AutoTokenizer, AutoModel
 from sklearn.decomposition import PCA
 import torch
 
-db_in_path = "./db/tvml0.db"
+db_in_path = "./db/tvmlw.db"
 db_out_path = "./db/tvml.db"
 
 def stream_program_data() -> Iterator[Dict]:
@@ -49,6 +49,7 @@ def main():
         stations_arr=[f'{x}:{y}' for x in static_tokens_conf.get('stations',{}).keys() for y in static_tokens_conf['stations'][x] ]
     else:
         blocklist = list()
+    print(stations_arr)
 
     model_conf = {}
     if os.path.isfile("./model_config.yaml"):
@@ -63,14 +64,15 @@ def main():
     pgs=[]
     print('reading program data...', end='', file=sys.stderr, flush=True);
     for pg in stream_program_data():
-        pg['ws1']=list(json.loads(pg["words1"]))
-        pg['ws2']=list(json.loads(pg["words2"]))
+        pg['ws1']=list(json.loads(pg["token_title_ipa"] or '[]'))
+        pg['ws2']=list(json.loads(pg["token_description_ipa"] or '[]'))
         pg['ws']=list(itertools.chain(pg["ws1"],pg["ws2"]))
-        pg['duration']=int(
-            (datetime.datetime.strptime(pg['pg_end'],'%Y%m%d%H%M')
-              -datetime.datetime.strptime(pg['pg_start'],'%Y%m%d%H%M')
-            ).total_seconds() // 60)
-        pg['genre_arr']=pg['genre'].split(',') if pg['genre'] else []
+        # pg['duration']=int(
+        #     (datetime.datetime.strptime(pg['pg_end'],'%Y%m%d%H%M')
+        #       -datetime.datetime.strptime(pg['pg_start'],'%Y%m%d%H%M')
+        #     ).total_seconds() // 60)
+        # pg['genre_arr']=pg['genre'].split(',') if pg['genre'] else []
+        pg['genres_arr'] = [g['lv1'] for g in json.loads(pg['genres']) if g['lv1'] not in [14]] if pg['genres'] else []
         pgs.append(pg)
         # print(pg)
     print('finish.', file=sys.stderr, flush=True)
@@ -82,31 +84,28 @@ def main():
             if model_conf.get('_dev_train_max_size',-1)>0:
                 if i >= model_conf['_dev_train_max_size']:
                     break
-            if pg['is_target'] == 0 and pg['is_preinstalled'] == 0:
+            if pg['is_target_channel'] == 0:#  and pg['is_preinstalled'] == 0:
                 continue
-            if pg.get('interaction', '_') not in ['p','n']:
+            if pg.get('interaction', '-') not in ['P','N']:
                 continue
             if len(pg['ws'])<=0:
                 continue
             i+=1
             yield pg
     def make_other_feature(pg):
-        assert len(pg['genre_arr'])<=1, "複数ジャンルには対応していません。"
-        _st=f"{pg['tuner']}:{pg['station_id']}"
+        # assert len(pg['genres_arr'])<=1, "複数ジャンルには対応していません。"
         return [
             scale_duration(pg['duration']),
-            int(pg['genre_arr'][0],16) if pg['genre_arr'] else 99,
-            stations_arr.index(_st) if _st in stations_arr else 999,
+            pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
+            pg['network_id']*100000+pg['service_id'],
         ]
 
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
         num_cols = df.shape[1]
-        df = df.rename(columns={num_cols - 2: 'genre_cat', num_cols - 1: 'station_cat'})
-        # df = df.rename(columns={num_cols - 1: 'genre_cat'})
-        # df = df.rename(columns={num_cols - 1: 'station_cat'})
+        df = df.rename(columns={num_cols - 2: 'genre_cat', num_cols - 1: 'channel_cat'})
         df['genre_cat'] = df['genre_cat'].astype(int) #.astype('category')
-        df['station_cat'] = df['station_cat'].astype(int) #.astype('category')
+        df['channel_cat'] = df['channel_cat'].astype(int) #.astype('category')
         return df
 
     text_full = []
@@ -131,9 +130,9 @@ def main():
         return np.vstack(vectors)
 
     for pg in pg_filter4classifier(pgs):
-        text_full.append(f"{pg['pg_title']} {pg['pg_detail']}")
+        text_full.append(f"{pg['pgm_title'] or ''} {pg['pgm_description'] or ''}")
         X_others.append(make_other_feature(pg))
-        y_all.append(1 if pg['interaction']=='p' else 0)
+        y_all.append(1 if pg['interaction']=='P' else 0)
     
     X_text_full = batch_vectorise(text_full, model_conf.get('transformers_tokenizer_batch_size'))
     X_text_128 = pca.fit_transform(X_text_full)
@@ -166,7 +165,7 @@ def main():
     y_te_probs = classifier.predict_proba(X_te)[:, 1]
     y_te_preds = classifier.predict(X_te)
     print("=== テストデータでのスコア ===")
-    print(classification_report(y_te, y_te_preds, target_names=["n", "p"]))
+    print(classification_report(y_te, y_te_preds, target_names=["N", "P"]))
     auc = roc_auc_score(y_te, y_te_probs)
     print(f"ROC-AUC Score: {auc:.4f}")
     loss = log_loss(y_te, y_te_probs)
@@ -188,7 +187,7 @@ def main():
             if model_conf.get('_dev_predict_max_size',-1)>0:
                 if i >= model_conf['_dev_predict_max_size']:
                     break
-            if pg['is_target']==0 and pg['is_preinstalled']==0:
+            if pg['is_target_channel']==0:#  and pg['is_preinstalled']==0:
                 continue
             if pg['asof']!=pg['asof_max']:
                 continue
@@ -202,7 +201,7 @@ def main():
         cursorz = connz.cursor()
         with connz:
             for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), model_conf.get('transformers_tokenizer_batch_size')):
-                txts = [f'{pg["pg_title"]} {pg["pg_detail"]}' for pg in pgschunk]
+                txts = [f'{pg["pgm_title"] or ''} {pg["pgm_description"] or ''}' for pg in pgschunk]
                 inputs = tokenizer(txts, return_tensors='pt', padding=True, truncation=True).to(device)
                 with torch.no_grad():
                     outputs = model(**inputs)
@@ -215,12 +214,12 @@ def main():
                 df = to_X_pd_from_np(vec_join)
                 for i, pg in enumerate(pgschunk):
                     pg['pred_proba'] = float(classifier.predict_proba(df)[i][1])
-                    pg['pred_label'] = 'p' if pg['pred_proba'] >= 0.5 else 'n'
+                    pg['pred_label'] = 'P' if pg['pred_proba'] >= 0.5 else 'N'
                 for pg in pgschunk:
-                    is_blocked = any(b.issubset(pg['ws']) for b in blocklist)
-                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where uniqk=?',[pg['pred_label'], pg['pred_proba'], pg['uniqk']])
-                    if (not is_blocked) and pg['is_target'] == 1 and pg['pred_label'] == 'p':
-                        print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['pg_title']} {pg['pg_detail']}")
+                    is_blocked = False #any(b.issubset(pg['ws']) for b in blocklist)
+                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], pg['tvml_id']])
+                    if (not is_blocked) and pg['is_target_channel'] == 1 and pg['pred_label'] == 'P':
+                        print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['pgm_title']} {pg['pgm_description']}")
     finally:
         connz.close()
     print('finish.', file=sys.stderr, flush=True)
