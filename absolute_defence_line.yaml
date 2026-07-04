@@ -9,8 +9,3 @@ features:
     words:
       - word: "水戸黄門"
         score: 1.0
-  suspense:
-    name: "サスペンス"
-    words:
-      - word: "サスペンス"
-        score: 1.0

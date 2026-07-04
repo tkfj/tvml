@@ -17,6 +17,9 @@ with open(db_path_mlw,'w') as f:
     # ファイルがあれば切り捨てる
     pass
 
+with open("./absolute_defence_line.yaml") as f:
+    adl_def = yaml.safe_load(f)
+
 conn = sqlite3.connect(':memory:')
 conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
 cursor = conn.cursor()
@@ -53,11 +56,11 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
   token_description_neologd TEXT,
   token_extended_ipa TEXT,
   token_extended_neologd TEXT,
+  absolute_defence_line TEXT,
   interaction TEXT,
   pred_label TEXT,
   pred_proba REAL,
   is_target_channel INTEGER NOT NULL,
-  adl TEXT,
   UNIQUE (pgm_uid, start_at)
 )
 """
@@ -116,40 +119,82 @@ BEGIN
   ;
 END
 """
-# create_idx_tvml_pgm_sql="""
-# CREATE UNIQUE INDEX IF NOT EXISTS {{DB_NAME}}.idx_tvml_pgm ON tvml (
-#   bsdate, tuner, station_id, pg_start
-# )
-# """
-# cursor.execute(create_tvml_sql.replace('{{DB_NAME}}','mldb'))
 cursor.execute(create_tvml_sql.replace('{{DB_NAME}}','tvmldb'))
 cursor.execute(create_tvml_sql.replace('{{DB_NAME}}','main'))
 cursor.execute(create_tvlike_sql.replace('{{DB_NAME}}','tvlikedb'))
 cursor.execute(create_trg_like_ins_sql.replace('{{DB_NAME}}','tvlikedb'))
 cursor.execute(create_tvtoken_sql.replace('{{DB_NAME}}','tvtokendb'))
 cursor.execute(create_trg_token_ins_sql.replace('{{DB_NAME}}','tvtokendb'))
-# cursor.execute(create_idx_tvml_pgm_sql.replace('{{DB_NAME}}','tvmldb'))
-# cursor.execute(create_idx_tvml_pgm_sql.replace('{{DB_NAME}}','tvml0db'))
-
 
 with open("./channels.yaml", "r") as f:
   channels_conf = yaml.safe_load(f)
 channels = channels_conf.get('channels',{})
 
-with conn:
-  conn.execute("""
-    CREATE TABLE IF NOT EXISTS channels (
-      channel_type TEXT NOT NULL,
-      service_id INTEGER NOT NULL,
-      is_target_channel INTEGER NOT NULL,
-      PRIMARY KEY (channel_type, service_id)
-    )
-  """)
+conn.execute("""
+  CREATE TABLE IF NOT EXISTS channels (
+    channel_type TEXT NOT NULL,
+    service_id INTEGER NOT NULL,
+    is_target_channel INTEGER NOT NULL,
+    PRIMARY KEY (channel_type, service_id)
+  )
+""")
 
 with conn:
   for t in channels.keys():
     for s in channels[t]:
       cursor.execute("INSERT INTO channels VALUES(?,?,1)",[t,s])
+
+def make_absolute_defence_line(pg):
+    def _extract(_w):
+        if _w is None or len(_w)==0:
+            return False
+        if pg['pgm_title'] and _w in pg['pgm_title']:
+            return True
+        if pg['pgm_description'] and _w in pg['pgm_description']:
+            return True
+        if pg['extended'] and _w in pg['extended']:#TODO JSON 展開する
+            return True
+        return False
+    _scores = [(_fsk, _ws['score'] if _extract(_ws['word']) else 0, ) for _fsk, _fsv in adl_def['features'].items() for _ws in _fsv['words']]
+    _scdic = dict()
+    for _fea, _sc in _scores:
+        _scdic[_fea] = _scdic.get(_fea, 0.0) + _sc
+    _retdic = dict()
+    for _fea, _sc in _scdic.items():
+        if _sc == 0.0: continue
+        if adl_def['features'][_fea].get('name') is None: continue
+        _retdic[_fea] = {
+          'name': adl_def['features'][_fea]['name'],
+          'score': _sc,
+        }
+    return _retdic if len(_retdic) > 0 else None
+
+cursor.execute("""
+  CREATE TABLE IF NOT EXISTS absolute_defence_line (
+    pgm_uid INTEGER NOT NULL,
+    start_at INTEGER NOT NULL,
+    absolute_defence_line TEXT NOT NULL,
+    PRIMARY KEY (pgm_uid, start_at)
+  )
+""")
+with conn:
+  cursor.execute("""
+    SELECT *
+    FROM epgdb.epg
+    WHERE (pgm_title IS NOT NULL AND pgm_title != '')
+    OR (pgm_description IS NOT NULL AND pgm_description != '')
+    OR (extended IS NOT NULL AND extended != '')
+  """)
+  cursor_w = conn.cursor()
+  cursor_w.row_factory = sqlite3.Row
+  for _row in tqdm(cursor):
+    _adl = make_absolute_defence_line(_row)
+    if _adl:
+      cursor_w.execute("""
+        INSERT INTO absolute_defence_line
+        VALUES (?,?,?)
+      """, [_row['pgm_uid'], _row['start_at'], json.dumps(_adl,ensure_ascii=False)])
+  cursor_w.close()
 
 from prepare_core import PrepareCore
 preparer = PrepareCore()
@@ -174,7 +219,7 @@ with conn:
     OR epg.pgm_description IS DISTINCT FROM token.pgm_description
     OR epg.extended IS DISTINCT FROM token.extended
   """)
-              
+
   for row in tqdm(cursor):
     if row['pgm_title'] != row['token_title'] and row['pgm_title'] is not None and len(row['pgm_title'])>0:
       w1 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(row['pgm_title'])),ensure_ascii=False)
@@ -207,7 +252,7 @@ with conn:
           token_title_ipa,
           token_description_ipa,
           token_extended_ipa
-        ) VALUES(
+        ) VALUES (
           ?,?,?,?,?,?,?,?,?
         )
         ON CONFLICT(pgm_uid, start_at)
@@ -254,6 +299,7 @@ INSERT INTO tvmldb.tvml (
   token_description_neologd,
   token_extended_ipa,
   token_extended_neologd,
+  absolute_defence_line,
   interaction,
   is_target_channel
 ) SELECT
@@ -281,6 +327,7 @@ INSERT INTO tvmldb.tvml (
   tvtoken.token_description_neologd,
   tvtoken.token_extended_ipa,
   tvtoken.token_extended_neologd,
+  adl.absolute_defence_line,
   COALESCE(tvlike.interaction, '-'),
   COALESCE(channels.is_target_channel, 0)
 FROM epgdb.epg as epg
@@ -294,6 +341,9 @@ ON epg.pgm_uid = tvtoken.pgm_uid
 AND epg.start_at > tvtoken.start_at - 8*24*60*60*1000
 AND epg.start_at < tvtoken.start_at + 8*24*60*60*1000
 AND epg.pgm_title = tvtoken.pgm_title
+LEFT OUTER JOIN absolute_defence_line as adl
+ON epg.pgm_uid = adl.pgm_uid
+AND epg.start_at = tvtoken.start_at
 LEFT OUTER JOIN channels
 ON epg.channel_type = channels.channel_type
 AND epg.service_id = channels.service_id
@@ -302,57 +352,8 @@ AND epg.service_id = channels.service_id
 with conn:
   cursor.execute(insert_pgm_sql)
 
-# preparer = prepare1.Prepare1()
-
-
-# def fetch_tvml0():
-#   global conn
-#   cursor_sel = conn.cursor()
-#   try:
-#     cursor_sel.row_factory=sqlite3.Row
-#     cursor_sel.execute("SELECT * FROM tvml0_db.tvml")
-#     for row in cursor_sel:
-#       yield row
-#   finally:
-#     cursor_sel.close()
-
-# from tqdm import tqdm
-
-# with conn:
-#   for row in tqdm(fetch_tvml0()):
-#     cursor.execute(
-#       "select * from tvml_db.tvml where bsdate=? and tuner=? and station_id=? and pg_start=? and pg_title=? and pg_detail=? limit 1"
-#       ,[row['bsdate'],row['tuner'],row['station_id'],row['pg_start'],row['pg_title'],row['pg_detail'],]
-#     ) #TODO 複数ある場合の保険をかけるか？→いらんのでは. 同じなんだし。
-#     tgtrows=cursor.fetchall()
-#     print(f"{row['pg_title']} {row['pg_detail']}")
-#     if len(tgtrows)>0:
-#       # tgtrow = tgtrows.pop()
-#       w1 = tgtrows[0]['words1']
-#       w2 = tgtrows[0]['words2']
-#     else:
-#       w1 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(row['pg_title'])),ensure_ascii=False)
-#       w2 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(row['pg_detail'])),ensure_ascii=False)
-#         #API投げる
-#         #DB更新
-#     cursor.execute(
-#       "update tvml0_db.tvml set words1=?, words2=? where uniqk=?"
-#       , [w1, w2, row['uniqk']]
-#     )
-#   cursor.execute(
-#     "select interaction,count(*) as c from tvml0_db.tvml group by interaction"
-#   )
-#   for row in cursor.fetchall():
-#     print(f"{row['interaction']}: {row['c']}")
-  
-
 cursor.execute(f"DETACH DATABASE epgdb")
 cursor.execute(f"DETACH DATABASE tvtokendb")
 cursor.execute(f"DETACH DATABASE tvlikedb")
 cursor.execute(f"DETACH DATABASE tvmldb")
 conn.close()
-
-
-
-# TODO
-# pgm_uid重複の件、そんなに頑張らなくても、いままでどおりのユニーク判定でいいのでは。。。。

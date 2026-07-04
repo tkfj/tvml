@@ -43,17 +43,12 @@ FROM tvml
 
 def main():
 
-    if os.path.isfile("./absolute_defence_line.yaml"):
-        with open("./absolute_defence_line.yaml") as f:
-            adl_def = yaml.safe_load(f)
-    else:
-        adl_def={'features':dict()}
-    print(adl_def)
+    with open("./absolute_defence_line.yaml") as f:
+        adl_def = yaml.safe_load(f)
 
     model_conf = {}
-    if os.path.isfile("./model_config.yaml"):
-        with open("./model_config.yaml") as f:
-            model_conf = yaml.safe_load(f)
+    with open("./model_config.yaml") as f:
+        model_conf = yaml.safe_load(f)
     print(model_conf)
 
     def scale_duration(duration):
@@ -95,21 +90,9 @@ def main():
         ]
  
     def make_absolute_defence_line(pg):
-        def _extract(_w):
-            if _w is None or len(_w)==0:
-                return False
-            if pg['pgm_title'] and _w in pg['pgm_title']:
-                return True
-            if pg['pgm_description'] and _w in pg['pgm_description']:
-                return True
-            if pg['extended'] and _w in pg['extended']:#TODO JSON 展開する
-                return True
-            return False
-        _scores = [(_fsk, _ws['score'] if _extract(_ws['word']) else 0, ) for _fsk, _fsv in adl_def['features'].items() for _ws in _fsv['words']]
-        _dic = dict()
-        for _fea, _sc in _scores:
-            _dic[_fea] = _dic.get(_fea, 0.0) + _sc
-        return _dic
+        _adltxt = pg.get('absolute_defence_line')
+        _adl = json.loads(_adltxt) if _adltxt else {}
+        return {_fea: float(_adl.get(_fea, {}).get('score', 0.0)) for _fea in adl_def['features'].keys() }
 
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
@@ -233,19 +216,7 @@ def main():
                     pg['pred_proba'] = float(classifier.predict_proba(df)[i][1])
                     pg['pred_label'] = 'P' if pg['pred_proba'] >= 0.5 else 'N'
                 for pg in pgschunk:
-                    pg['vec_adl']
-                    adl_txt = dict()
-                    for _k,_v in pg['adl'].items():
-                        if _v == 0.0:
-                            continue
-                        if adl_def['features'][_k].get('name'):
-                            adl_txt[_k] = {
-                                'name': adl_def['features'][_k]['name'],
-                                'score': _v
-                            }
-                    if len(adl_txt) == 0:
-                        adl_txt = None
-                    cursorz.execute('update tvml set pred_label=?, pred_proba=?, adl=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], json.dumps(adl_txt, ensure_ascii=False), pg['tvml_id']])
+                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], pg['tvml_id']])
                     if pg['is_target_channel'] == 1 and pg['pred_label'] == 'P':
                         print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['pgm_title']} {pg['pgm_description']}")
 
