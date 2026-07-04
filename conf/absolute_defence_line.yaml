@@ -1,11 +1,19 @@
 features:
   sakurai_hinako:
     name: "桜井日奈子"
+    monotone_constraints: 1
     words:
       - word: "桜井日奈子"
         score: 1.0
-  mitokoumon:
-    name: "水戸黄門"
+  favorites:
+    name: "お気に入り"
+    monotone_constraints: 1
     words:
       - word: "水戸黄門"
+        score: 1.0
+      - word: "ブラタモリ"
+        score: 1.0
+      - word: "デザインあ"
+        score: 1.0
+      - word: "解体キングダム"
         score: 1.0

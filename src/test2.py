@@ -5,8 +5,6 @@ import os
 from tqdm import tqdm
 import yaml
 
-import prepare1
-
 db_path_like = "./db/tvlike.db"
 db_path_token = "./db/tvtoken.db"
 db_path_epg = "./db/epg.db"
@@ -126,7 +124,7 @@ cursor.execute(create_trg_like_ins_sql.replace('{{DB_NAME}}','tvlikedb'))
 cursor.execute(create_tvtoken_sql.replace('{{DB_NAME}}','tvtokendb'))
 cursor.execute(create_trg_token_ins_sql.replace('{{DB_NAME}}','tvtokendb'))
 
-with open("./channels.yaml", "r") as f:
+with open("./conf/channels.yaml", "r") as f:
   channels_conf = yaml.safe_load(f)
 channels = channels_conf.get('channels',{})
 
@@ -196,8 +194,8 @@ with conn:
       """, [_row['pgm_uid'], _row['start_at'], json.dumps(_adl,ensure_ascii=False)])
   cursor_w.close()
 
-from prepare_core import PrepareCore
-preparer = PrepareCore()
+from prepare_mecab import PrepareMecab
+preparer = PrepareMecab()
 with conn:
   cursor.execute(f"""
     SELECT

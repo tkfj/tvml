@@ -7,50 +7,10 @@ import json
 
 from typing import Iterator, Dict
 
-from abc import ABC, abstractmethod
-
-class PrepareCore(ABC):
+class PrepareMecab:
     def __init__(self):
-        self.db_path_intr = "./db/tvlike.db"
-        self.db_path_pgm = "./db/epg.db"
-        self.db_path_ml = "./db/tvml.db"
-
         self.MECAB_API_URL = os.getenv("MECAB_API_URL")
         self.session = requests.Session()
-        self.colnames, self.coltypes, self.colnnuls, self.pks = self.init_colnames()
-        self.inskeys, self.updkeys, self.inssql = self.init_inssql()
-
-    def init_colnames(self):
-        conn1 = sqlite3.connect(self.db_path_pgm);
-        conn1.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
-        cursor = conn1.cursor()
-        colnames = []
-        coltypes = []
-        colnnuls = []
-        pks = []
-        try:
-            cursor.execute("PRAGMA table_info(programs)")
-            for row in cursor:
-                colnames.append(row["name"])
-                coltypes.append(row["type"])
-                colnnuls.append(row["notnull"]==1)
-                if row["pk"]==1:
-                    pks.append(row["name"])
-        finally:
-            conn1.close()
-        return colnames, coltypes, colnnuls, pks
-    
-    def init_inssql(self):
-        inskeys = list(itertools.chain(['src'], self.colnames,['words1','words2','interaction','is_blocked']))
-        updkeys = [n for n in inskeys if n not in ['src', 'pgm_uid']]
-        inssql = "INSERT INTO tvml ("
-        inssql += ", ".join(inskeys) 
-        inssql += ") VALUES ("
-        inssql += ", ".join([f":{n}" for n in inskeys]) 
-        inssql += ") ON CONFLICT (src, pgm_uid) DO UPDATE SET "
-        inssql += ", ".join([f"{n} = EXCLUDED.{n}" for n in updkeys])
-        return inskeys, updkeys, inssql
-
 
     def call_mecab_api(self,text):
         text = text.upper()
@@ -172,86 +132,3 @@ class PrepareCore(ABC):
             if s:
                 sentence.append(s)
         return sentence
-
-    def stream_programs(self) -> Iterator[Dict]:
-        """
-        データベースから番組情報を1件ずつ辞書形式で返すジェネレータ
-        """
-        conn = sqlite3.connect(self.db_path_pgm)
-        conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
-        cursor = conn.cursor()
-
-        try:
-            # 大量のデータを扱うため、一度にフェッチせずカーソルを回す
-            cursor.execute("""
-with latest_programs as (
-select *,
-dense_rank() over (partition by bsdate order by asof desc) as rk
-from programs
-)
-select * from latest_programs
-where rk=1
-            """)
-            for row in cursor:
-                yield dict(row)
-        finally:
-            conn.close()
-
-    def stream_interactions(self) -> Iterator[Dict]:
-        """
-        データベースから番組情報を1件ずつ辞書形式で返すジェネレータ
-        """
-        if not os.path.isfile(self.db_path_intr):
-            return
-        conn = sqlite3.connect(self.db_path_intr)
-        conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
-        cursor = conn.cursor()
-        try:
-            # 大量のデータを扱うため、一度にフェッチせずカーソルを回す
-            cursor.execute("""
-WITH
-    interactions_rank AS (
-    SELECT
-    *,
-    ROW_NUMBER() OVER(PARTITION BY bsdate,tuner,station_id,pg_start,pg_end,pg_title ORDER BY asof DESC) AS asofrk
-    FROM interactions
-)
-, interactions_latest AS (
-    SELECT *
-    FROM interactions_rank
-    WHERE asofrk=1
-)
-SELECT * FROM interactions_latest
-            """)
-            for row in cursor:
-                yield dict(row)
-        finally:
-            conn.close()
-
-    def init_out_table(self):
-        createtable = "CREATE TABLE IF NOT EXISTS tvml ("
-        createtable += ", ".join([
-            f"{n} {t}{' NOT NULL' if nn else ''}"
-            for n,t,nn
-            in zip(itertools.chain(['src'], self.colnames, ['words1','words2','interaction','pred_label','pred_proba','is_blocked'])
-                    , itertools.chain(['INTEGER'], self.coltypes, ['TEXT','TEXT','TEXT','TEXT','REAL','INTEGER'])
-                    , itertools.chain([True], self.colnnuls, [False,False,False,False,False,True])
-                )
-        ])
-        pkss=list(itertools.chain(['src'], self.pks))
-        if len(pkss) > 0:
-            createtable += ", PRIMARY KEY ("
-            createtable += ", ".join(pkss)
-            createtable += ")"
-        createtable += ")"
-        print(createtable)
-        with open(self.db_path_ml,"w"):
-            # ファイルを空にする(仮)
-            pass
-
-        conn_ml = sqlite3.connect(self.db_path_ml)
-        conn_ml.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
-        try:
-            conn_ml.execute(createtable)
-        finally:
-            conn_ml.close()

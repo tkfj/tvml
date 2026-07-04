@@ -52,7 +52,7 @@ def main():
     print(model_conf)
 
     def scale_duration(duration):
-        d=min(max(duration,1),180)
+        d=min(max(duration/1000/60,1),180)
         return math.log(d) / math.log(180)
 
     pgs=[]
@@ -82,23 +82,27 @@ def main():
             i+=1
             yield pg
 
-    def make_other_feature(pg):
-        return [
-            scale_duration(pg['duration']),
-            pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
-            pg['network_id']*100000+pg['service_id'],
-        ]
- 
     def make_absolute_defence_line(pg):
         _adltxt = pg.get('absolute_defence_line')
         _adl = json.loads(_adltxt) if _adltxt else {}
         return {_fea: float(_adl.get(_fea, {}).get('score', 0.0)) for _fea in adl_def['features'].keys() }
 
+    other_feature_names = ['duration', 'genre1_cat', 'channel_cat']
+    def make_other_feature(pg):
+        other_features = [
+            scale_duration(pg['duration']),
+            pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
+            pg['network_id']*100000+pg['service_id'],
+        ]
+        return other_features
+    
     def to_X_pd_from_np(nparr):
-        df = pd.DataFrame(nparr)
-        num_cols = df.shape[1]
-        df = df.rename(columns={num_cols - 2: 'genre_cat', num_cols - 1: 'channel_cat'})
-        df['genre_cat'] = df['genre_cat'].astype(int) #.astype('category')
+        df = pd.DataFrame(nparr, columns=list(itertools.chain(
+            [f'bert_{i+1}' for i in range(pca_conf['n_components'])],
+            adl_def['features'].keys(),
+            other_feature_names,
+        )))
+        df['genre1_cat'] = df['genre1_cat'].astype(int) #.astype('category')
         df['channel_cat'] = df['channel_cat'].astype(int) #.astype('category')
         return df
 
@@ -132,19 +136,19 @@ def main():
         y_all.append(1 if pg['interaction']=='P' else 0)
 
     X_text_full = batch_vectorise(text_full, model_conf.get('transformers_tokenizer_batch_size'))
-    X_text_128 = pca.fit_transform(X_text_full)
-    X_all_nparr = np.hstack((
-        np.array(X_text_128),
+    X_text_pca = pca.fit_transform(X_text_full)
+    X_nparr_all = np.hstack((
+        np.array(X_text_pca),
         np.array(X_adl),
         np.array(X_others),
     ))
-    y_all_nparr = np.array(y_all)
-
-    X_all_pd = to_X_pd_from_np(X_all_nparr)
+    y_nparr_all = np.array(y_all)
+    X_pd_all = to_X_pd_from_np(X_nparr_all)
+    print(X_pd_all)
 
     # データを訓練用8割、テスト用2割に分割
     X_tr, X_te, y_tr, y_te = train_test_split(
-        X_all_pd, y_all_nparr, test_size=0.2, random_state=43, stratify=y_all_nparr
+        X_pd_all, y_nparr_all, test_size=0.2, random_state=43, stratify=y_nparr_all
     )
 
     pos_count = np.sum(y_tr == 1)
