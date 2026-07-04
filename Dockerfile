@@ -1,5 +1,3 @@
-#FROM python:3.11-slim-bookworm
-#FROM nvcr.io/nvidia/pytorch:26.05-py3
 FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
 
 ENV TZ=Asia/Tokyo
@@ -21,9 +19,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt --break-system-pack
 
 # ソースコードのコピー
 COPY ./src ./src
-COPY channels.yaml channels.yaml
-COPY absolute_defence_line.yaml absolute_defence_line.yaml
-COPY model_config.yaml model_config.yaml
+COPY ./conf ./conf
 
 # 本番実行用コマンド
 CMD ["python", "src/main.py"]

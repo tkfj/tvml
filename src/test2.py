@@ -17,7 +17,7 @@ with open(db_path_mlw,'w') as f:
     # ファイルがあれば切り捨てる
     pass
 
-with open("./absolute_defence_line.yaml") as f:
+with open("./conf/absolute_defence_line.yaml") as f:
     adl_def = yaml.safe_load(f)
 
 conn = sqlite3.connect(':memory:')

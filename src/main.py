@@ -43,11 +43,11 @@ FROM tvml
 
 def main():
 
-    with open("./absolute_defence_line.yaml") as f:
+    with open("./conf/absolute_defence_line.yaml") as f:
         adl_def = yaml.safe_load(f)
 
     model_conf = {}
-    with open("./model_config.yaml") as f:
+    with open("./conf/model_config.yaml") as f:
         model_conf = yaml.safe_load(f)
     print(model_conf)
 
