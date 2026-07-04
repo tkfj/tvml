@@ -144,7 +144,14 @@ def main():
     ))
     y_nparr_all = np.array(y_all)
     X_pd_all = to_X_pd_from_np(X_nparr_all)
-    print(X_pd_all)
+    # print(X_pd_all)
+
+    monotone_constraints = tuple(itertools.chain(
+        [0] * pca_conf['n_components'],
+        [adl_def['features'][_k].get('monotone_constraints', 0) for _k in adl_def['features'].keys()],
+        [0] * len(other_feature_names),
+    ))
+    # print(monotone_constraints)
 
     # データを訓練用8割、テスト用2割に分割
     X_tr, X_te, y_tr, y_te = train_test_split(
@@ -158,6 +165,7 @@ def main():
     classifier = xgb.XGBClassifier(
       scale_pos_weight=xgb_scale_pos_weight,
       enable_categorical=True,
+      monotone_constraints = monotone_constraints,
       **xgb_conf
     )
     classifier.fit(X_tr, y_tr)
