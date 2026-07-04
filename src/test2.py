@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
   pred_label TEXT,
   pred_proba REAL,
   is_target_channel INTEGER NOT NULL,
---  is_preinstalled INTEGER NOT NULL,
+  adl TEXT,
   UNIQUE (pgm_uid, start_at)
 )
 """
@@ -132,14 +132,9 @@ cursor.execute(create_trg_token_ins_sql.replace('{{DB_NAME}}','tvtokendb'))
 # cursor.execute(create_idx_tvml_pgm_sql.replace('{{DB_NAME}}','tvml0db'))
 
 
-#TODO stationsは必要。is_target_channel処理で使う。
-stations = {}
-# static_tokens = {}
-if os.path.isfile("./static_tokens.yaml"):
-    with open("./static_tokens.yaml", "r") as f:
-        static_tokens_conf = yaml.safe_load(f)
-    stations = static_tokens_conf.get('stations',{})
-    # static_tokens = static_tokens_conf.get('tokens',{})
+with open("./channels.yaml", "r") as f:
+  channels_conf = yaml.safe_load(f)
+channels = channels_conf.get('channels',{})
 
 with conn:
   conn.execute("""
@@ -152,74 +147,16 @@ with conn:
   """)
 
 with conn:
-  for t in stations.keys():
-    for s in stations[t].keys():
+  for t in channels.keys():
+    for s in channels[t]:
       cursor.execute("INSERT INTO channels VALUES(?,?,1)",[t,s])
-#   for intr in static_tokens.keys():
-#     for i, t in enumerate(static_tokens[intr]):
-#       cursor.execute("""
-#         INSERT INTO tvml0_db.tvml (
-#           asof, bsdate, tuner, station_id, pg_start, pg_end, pg_title, pg_detail, interaction, is_target, is_preinstalled
-#         ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-#       """, ['000101010000', '00010101', f'__{intr}', f'{i:08}', '000101010000', '000101010001', t, '', intr, 0, 1])
-
-# with_token_sql = """
-# token_rank AS (
-#   SELECT
-#     *,
-#     DENSE_RANK() OVER(PARTITION BY pgm_uid, bsdate ORDER BY asof DESC) AS rk
-#   FROM tvtokendb.tvtoken
-# ), 
-# token_base AS (
-#   SELECT
-#     *,
-#     1 AS token_exists
-#   FROM token_rank
-#   WHERE rk = 1
-# )
-# """
-
-# with_like_sql = """
-# like_rank AS (
-#   SELECT
-#     *,
-#     DENSE_RANK() OVER(PARTITION BY pgm_uid, bsdate ORDER BY asof DESC) AS rk
-#   FROM tvlikedb.tvlike
-# ), 
-# like_base AS (
-#   SELECT
-#     *,
-#     1 AS like_exists
-#   FROM like_rank
-#   WHERE rk = 1
-# )
-# """
-
-# with_epg_sql = """
-# epg_base AS (
-#   SELECT
-#     *,
-#     1 AS epg_exists
-#   FROM epgdb.epg
-# )
-# """
 
 from prepare_core import PrepareCore
 preparer = PrepareCore()
 with conn:
-  #TODO extendedの中身が空の辞書の場合、いつまでたっても埋まらない → そう言うデータが保存されないように制御する
   cursor.execute(f"""
     SELECT
       epg.*,
---      COALESCE(epg.pgm_title, '') AS pgm_title, --TODO なんでCOALESCEしてるんだっけ
---      COALESCE(epg.pgm_description, '') AS pgm_description,
---      COALESCE(epg.extended, '') AS extended,
---      COALESCE(token.pgm_title, '') AS token_title,
---      COALESCE(token.pgm_description, '') AS token_description,
---      COALESCE(token.extended, '') AS token_extended,
-      epg.pgm_title AS pgm_title, --TODO なんでCOALESCEしてるんだっけ
-      epg.pgm_description AS pgm_description,
-      epg.extended AS extended,
       token.pgm_title AS token_title,
       token.pgm_description AS token_description,
       token.extended AS token_extended,
@@ -233,9 +170,9 @@ with conn:
     LEFT OUTER JOIN tvtokendb.tvtoken as token
     ON epg.pgm_uid = token.pgm_uid
     AND epg.start_at = token.start_at
-    WHERE epg.pgm_title IS NOT DISTINCT FROM token.pgm_title
-    OR epg.pgm_description IS NOT DISTINCT FROM token.pgm_description
-    OR epg.extended IS NOT DISTINCT FROM token.extended
+    WHERE epg.pgm_title IS DISTINCT FROM token.pgm_title
+    OR epg.pgm_description IS DISTINCT FROM token.pgm_description
+    OR epg.extended IS DISTINCT FROM token.extended
   """)
               
   for row in tqdm(cursor):

@@ -12,8 +12,6 @@ import pandas as pd
 import plotext as plt
 from tqdm import tqdm
 
-from collections import defaultdict
-
 from typing import Iterator, Dict
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
@@ -68,14 +66,9 @@ def main():
         pg['ws1']=list(json.loads(pg["token_title_ipa"] or '[]'))
         pg['ws2']=list(json.loads(pg["token_description_ipa"] or '[]'))
         pg['ws']=list(itertools.chain(pg["ws1"],pg["ws2"]))
-        # pg['duration']=int(
-        #     (datetime.datetime.strptime(pg['pg_end'],'%Y%m%d%H%M')
-        #       -datetime.datetime.strptime(pg['pg_start'],'%Y%m%d%H%M')
-        #     ).total_seconds() // 60)
-        # pg['genre_arr']=pg['genre'].split(',') if pg['genre'] else []
         pg['genres_arr'] = [g['lv1'] for g in json.loads(pg['genres']) if g['lv1'] not in [14]] if pg['genres'] else []
         pgs.append(pg)
-        # print(pg)
+
     print('finish.', file=sys.stderr, flush=True)
 
     print('make classifier...', end='', file=sys.stderr, flush=True)
@@ -95,7 +88,6 @@ def main():
             yield pg
 
     def make_other_feature(pg):
-        # assert len(pg['genres_arr'])<=1, "複数ジャンルには対応していません。"
         return [
             scale_duration(pg['duration']),
             pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
@@ -114,10 +106,10 @@ def main():
                 return True
             return False
         _scores = [(_fsk, _ws['score'] if _extract(_ws['word']) else 0, ) for _fsk, _fsv in adl_def['features'].items() for _ws in _fsv['words']]
-        _dic = defaultdict(lambda: 0.0)
+        _dic = dict()
         for _fea, _sc in _scores:
-            _dic[_fea] += _sc
-        return [_sc for _sc in _dic.values()]
+            _dic[_fea] = _dic.get(_fea, 0.0) + _sc
+        return _dic
 
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
@@ -151,10 +143,11 @@ def main():
 
     for pg in pg_filter4classifier(pgs):
         text_full.append(f"{pg['pgm_title'] or ''} {pg['pgm_description'] or ''}")
-        X_adl.append(make_absolute_defence_line(pg))
+        _adl = make_absolute_defence_line(pg)
+        X_adl.append([_sc for _sc in _adl.values()])
         X_others.append(make_other_feature(pg))
         y_all.append(1 if pg['interaction']=='P' else 0)
-    
+
     X_text_full = batch_vectorise(text_full, model_conf.get('transformers_tokenizer_batch_size'))
     X_text_128 = pca.fit_transform(X_text_full)
     X_all_nparr = np.hstack((
@@ -209,7 +202,7 @@ def main():
             if model_conf.get('_dev_predict_max_size',-1)>0:
                 if i >= model_conf['_dev_predict_max_size']:
                     break
-            if pg['is_target_channel']==0:#  and pg['is_preinstalled']==0:
+            if pg['is_target_channel']==0:
                 continue
             if pg['asof']!=pg['asof_max']:
                 continue
@@ -231,7 +224,8 @@ def main():
                     vecs = pca.transform(vecs)
                 for pg,vec in zip(pgschunk, vecs):
                     pg['vec_ws0'] = vec
-                    pg['vec_adl'] = np.array(make_absolute_defence_line(pg))
+                    pg['adl'] = make_absolute_defence_line(pg)
+                    pg['vec_adl'] = np.array([_sc for _sc in pg['adl'].values()])
                     pg['vec_meta'] = np.array(make_other_feature(pg))
                 vec_join = np.vstack([np.hstack((pg['vec_ws0'], pg['vec_adl'], pg['vec_meta'],)) for pg in pgschunk])
                 df = to_X_pd_from_np(vec_join)
@@ -239,10 +233,22 @@ def main():
                     pg['pred_proba'] = float(classifier.predict_proba(df)[i][1])
                     pg['pred_label'] = 'P' if pg['pred_proba'] >= 0.5 else 'N'
                 for pg in pgschunk:
-                    is_blocked = False #any(b.issubset(pg['ws']) for b in blocklist)
-                    cursorz.execute('update tvml set pred_label=?, pred_proba=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], pg['tvml_id']])
-                    if (not is_blocked) and pg['is_target_channel'] == 1 and pg['pred_label'] == 'P':
+                    pg['vec_adl']
+                    adl_txt = dict()
+                    for _k,_v in pg['adl'].items():
+                        if _v == 0.0:
+                            continue
+                        if adl_def['features'][_k].get('name'):
+                            adl_txt[_k] = {
+                                'name': adl_def['features'][_k]['name'],
+                                'score': _v
+                            }
+                    if len(adl_txt) == 0:
+                        adl_txt = None
+                    cursorz.execute('update tvml set pred_label=?, pred_proba=?, adl=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], json.dumps(adl_txt, ensure_ascii=False), pg['tvml_id']])
+                    if pg['is_target_channel'] == 1 and pg['pred_label'] == 'P':
                         print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['pgm_title']} {pg['pgm_description']}")
+
     finally:
         connz.close()
     print('finish.', file=sys.stderr, flush=True)
