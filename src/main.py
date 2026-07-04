@@ -12,6 +12,8 @@ import pandas as pd
 import plotext as plt
 from tqdm import tqdm
 
+from collections import defaultdict
+
 from typing import Iterator, Dict
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score, log_loss
@@ -42,14 +44,13 @@ FROM tvml
         conn.close()
 
 def main():
-    if os.path.isfile("./static_tokens.yaml"):
-        with open("./static_tokens.yaml") as f:
-            static_tokens_conf = yaml.safe_load(f)
-        blocklist = [set(b) for b in static_tokens_conf.get('blocklist',[])]
-        stations_arr=[f'{x}:{y}' for x in static_tokens_conf.get('stations',{}).keys() for y in static_tokens_conf['stations'][x] ]
+
+    if os.path.isfile("./absolute_defence_line.yaml"):
+        with open("./absolute_defence_line.yaml") as f:
+            adl_def = yaml.safe_load(f)
     else:
-        blocklist = list()
-    print(stations_arr)
+        adl_def={'features':dict()}
+    print(adl_def)
 
     model_conf = {}
     if os.path.isfile("./model_config.yaml"):
@@ -92,6 +93,7 @@ def main():
                 continue
             i+=1
             yield pg
+
     def make_other_feature(pg):
         # assert len(pg['genres_arr'])<=1, "複数ジャンルには対応していません。"
         return [
@@ -99,6 +101,23 @@ def main():
             pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
             pg['network_id']*100000+pg['service_id'],
         ]
+ 
+    def make_absolute_defence_line(pg):
+        def _extract(_w):
+            if _w is None or len(_w)==0:
+                return False
+            if pg['pgm_title'] and _w in pg['pgm_title']:
+                return True
+            if pg['pgm_description'] and _w in pg['pgm_description']:
+                return True
+            if pg['extended'] and _w in pg['extended']:#TODO JSON 展開する
+                return True
+            return False
+        _scores = [(_fsk, _ws['score'] if _extract(_ws['word']) else 0, ) for _fsk, _fsv in adl_def['features'].items() for _ws in _fsv['words']]
+        _dic = defaultdict(lambda: 0.0)
+        for _fea, _sc in _scores:
+            _dic[_fea] += _sc
+        return [_sc for _sc in _dic.values()]
 
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr)
@@ -110,6 +129,7 @@ def main():
 
     text_full = []
     X_text_full = []
+    X_adl = []
     X_others = []
     y_all = []
     device=model_conf.get('transformers_model_device')
@@ -131,6 +151,7 @@ def main():
 
     for pg in pg_filter4classifier(pgs):
         text_full.append(f"{pg['pgm_title'] or ''} {pg['pgm_description'] or ''}")
+        X_adl.append(make_absolute_defence_line(pg))
         X_others.append(make_other_feature(pg))
         y_all.append(1 if pg['interaction']=='P' else 0)
     
@@ -138,6 +159,7 @@ def main():
     X_text_128 = pca.fit_transform(X_text_full)
     X_all_nparr = np.hstack((
         np.array(X_text_128),
+        np.array(X_adl),
         np.array(X_others),
     ))
     y_all_nparr = np.array(y_all)
@@ -209,8 +231,9 @@ def main():
                     vecs = pca.transform(vecs)
                 for pg,vec in zip(pgschunk, vecs):
                     pg['vec_ws0'] = vec
+                    pg['vec_adl'] = np.array(make_absolute_defence_line(pg))
                     pg['vec_meta'] = np.array(make_other_feature(pg))
-                vec_join = np.vstack([np.hstack((pg['vec_ws0'], pg['vec_meta'],)) for pg in pgschunk])
+                vec_join = np.vstack([np.hstack((pg['vec_ws0'], pg['vec_adl'], pg['vec_meta'],)) for pg in pgschunk])
                 df = to_X_pd_from_np(vec_join)
                 for i, pg in enumerate(pgschunk):
                     pg['pred_proba'] = float(classifier.predict_proba(df)[i][1])
