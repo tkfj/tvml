@@ -1,19 +1,72 @@
 features:
-  sakurai_hinako:
-    name: "桜井日奈子"
+  actress1:
     monotone_constraints: 1
-    words:
-      - word: "桜井日奈子"
-        score: 1.0
-  favorites:
-    name: "お気に入り"
+    labels:
+      - name: "桜井日奈子"
+        words:
+          - word: "桜井日奈子"
+            score: 1.0
+      - name: "星野真里"
+        words:
+          - word: "星野真里"
+            score: 0.5
+      - name: "多部未華子"
+        words:
+          - word: "多部未華子"
+            score: 0.8
+  program1:
     monotone_constraints: 1
-    words:
-      - word: "水戸黄門"
-        score: 1.0
-      - word: "ブラタモリ"
-        score: 1.0
-      - word: "デザインあ"
-        score: 1.0
-      - word: "解体キングダム"
-        score: 1.0
+    labels:
+      - name: "水戸黄門"
+        words:
+          - word: "水戸黄門"
+            score: 0.5
+      - name: "ブラタモリ"
+        words:
+          - word: "ブラタモリ"
+            score: 1.0
+      - name: "デザインあ"
+        words:
+          - word: "デザインあ"
+            score: 1.0
+      - name: "解体キングダム"
+        words:
+          - word: "解体キングダム"
+            score: 1.0
+      - name: "タモリ・山中伸弥の"
+        words:
+          - word: "タモリ・山中伸弥の"
+            score: 1.0
+      - name: "美の巨人"
+        words:
+          - word: "美の巨人"
+            score: 1.0
+  endurance:
+    labels:
+      - words:
+          - word: "耐久"
+            score: 0.8
+          - word: "24時間"
+            score: 0.8
+          - word: "ル・マン"
+            score: 0.7
+  wec:
+    labels:
+      - words:
+          - word: "WEC"
+            score: 0.6
+          - word: "四輪"
+            score: 0.3
+          - word: "自動車"
+            score: 0.3
+  ewc:
+    labels:
+      - words:
+          - word: "EWC"
+            score: 0.6
+          - word: "二輪"
+            score: 0.3
+          - word: "バイク"
+            score: 0.3
+          - word: "FIM"
+            score: 0.4

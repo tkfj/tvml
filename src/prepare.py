@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
   token_description_neologd TEXT,
   token_extended_ipa TEXT,
   token_extended_neologd TEXT,
-  absolute_defence_line TEXT,
+  defence_features TEXT,
+  defence_labels TEXT,
   interaction TEXT,
   pred_label TEXT,
   pred_proba REAL,
@@ -153,25 +154,34 @@ def make_absolute_defence_line(pg):
         if pg['extended'] and _w in pg['extended']:#TODO JSON 展開する
             return True
         return False
-    _scores = [(_fsk, _ws['score'] if _extract(_ws['word']) else 0, ) for _fsk, _fsv in adl_def['features'].items() for _ws in _fsv['words']]
-    _scdic = dict()
-    for _fea, _sc in _scores:
-        _scdic[_fea] = _scdic.get(_fea, 0.0) + _sc
-    _retdic = dict()
-    for _fea, _sc in _scdic.items():
-        if _sc == 0.0: continue
-        if adl_def['features'][_fea].get('name') is None: continue
-        _retdic[_fea] = {
-          'name': adl_def['features'][_fea]['name'],
-          'score': _sc,
-        }
-    return _retdic if len(_retdic) > 0 else None
+    _adl_features = {}
+    _adl_labels = []
+    for _fea, _lbls in adl_def['features'].items():
+      _score = 0.0
+      for _lbl in _lbls.get("labels",[]):
+        _lbln = _lbl.get('name')
+        _found = False
+        for _ws in _lbl['words']:
+          _w = _ws['word']
+          _s = _ws['score']
+          if _extract(_w):
+             _score += _s
+             _found = True
+        if _found and _lbln:
+           _adl_labels.append(_lbln)
+      if _score != 0.0:
+        _adl_features[_fea] = max(0.0, min(1.0, _score))
+    return (
+       _adl_features if len(_adl_features)>0 else None,
+       _adl_labels if len(_adl_labels)>0 else None,
+    )
 
 cursor.execute("""
   CREATE TABLE IF NOT EXISTS absolute_defence_line (
     pgm_uid INTEGER NOT NULL,
     start_at INTEGER NOT NULL,
-    absolute_defence_line TEXT NOT NULL,
+    defence_features TEXT NOT NULL,
+    defence_labels TEXT,
     PRIMARY KEY (pgm_uid, start_at)
   )
 """)
@@ -186,12 +196,17 @@ with conn:
   cursor_w = conn.cursor()
   cursor_w.row_factory = sqlite3.Row
   for _row in tqdm(cursor):
-    _adl = make_absolute_defence_line(_row)
-    if _adl:
+    _adl_features, _adl_labels = make_absolute_defence_line(_row)
+    if _adl_features or _adl_labels:
       cursor_w.execute("""
         INSERT INTO absolute_defence_line
-        VALUES (?,?,?)
-      """, [_row['pgm_uid'], _row['start_at'], json.dumps(_adl,ensure_ascii=False)])
+        VALUES (?,?,?,?)
+      """, [
+        _row['pgm_uid'],
+        _row['start_at'],
+        json.dumps(_adl_features, ensure_ascii=False) if _adl_features else None,
+        json.dumps(_adl_labels,ensure_ascii=False) if _adl_labels else None,
+      ])
   cursor_w.close()
 
 from prepare_mecab import PrepareMecab
@@ -266,11 +281,6 @@ with conn:
         , [row['asof'], row['pgm_uid'], row['start_at'], row['pgm_title'], row['pgm_description'], row['extended'], w1, w2, w3]
       )
 
-
-#TODO イベントIDが一周回ったときの対処は、たぶん、start_at(またはbsdate)が８日以上差があるかどうか。
-#なぜなら、EPG配信期間が８日間だから。
-#レアケースなので、bsdateが違ったらもう別物とみなす。
-
 insert_pgm_sql = f"""
 INSERT INTO tvmldb.tvml (
   asof,
@@ -297,7 +307,8 @@ INSERT INTO tvmldb.tvml (
   token_description_neologd,
   token_extended_ipa,
   token_extended_neologd,
-  absolute_defence_line,
+  defence_features,
+  defence_labels,
   interaction,
   is_target_channel
 ) SELECT
@@ -325,7 +336,8 @@ INSERT INTO tvmldb.tvml (
   tvtoken.token_description_neologd,
   tvtoken.token_extended_ipa,
   tvtoken.token_extended_neologd,
-  adl.absolute_defence_line,
+  adl.defence_features,
+  adl.defence_labels,
   COALESCE(tvlike.interaction, '-'),
   COALESCE(channels.is_target_channel, 0)
 FROM epgdb.epg as epg

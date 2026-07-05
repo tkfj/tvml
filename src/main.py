@@ -83,9 +83,9 @@ def main():
             yield pg
 
     def make_absolute_defence_line(pg):
-        _adltxt = pg.get('absolute_defence_line')
+        _adltxt = pg.get('defence_features')
         _adl = json.loads(_adltxt) if _adltxt else {}
-        return {_fea: float(_adl.get(_fea, {}).get('score', 0.0)) for _fea in adl_def['features'].keys() }
+        return {_fea: float(_adl.get(_fea, 0.0)) for _fea in adl_def['features'].keys() }
 
     other_feature_names = ['duration', 'genre1_cat', 'channel_cat']
     def make_other_feature(pg):
@@ -144,14 +144,14 @@ def main():
     ))
     y_nparr_all = np.array(y_all)
     X_pd_all = to_X_pd_from_np(X_nparr_all)
-    # print(X_pd_all)
+    print(X_pd_all)
 
     monotone_constraints = tuple(itertools.chain(
         [0] * pca_conf['n_components'],
         [adl_def['features'][_k].get('monotone_constraints', 0) for _k in adl_def['features'].keys()],
         [0] * len(other_feature_names),
     ))
-    # print(monotone_constraints)
+    print(monotone_constraints)
 
     # データを訓練用8割、テスト用2割に分割
     X_tr, X_te, y_tr, y_te = train_test_split(
