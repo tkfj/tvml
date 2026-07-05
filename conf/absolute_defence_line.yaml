@@ -16,7 +16,7 @@ features:
             score: 0.8
   program1:
     monotone_constraints: 1
-    labels:
+    labels:  
       - name: "水戸黄門"
         words:
           - word: "水戸黄門"
@@ -33,13 +33,30 @@ features:
         words:
           - word: "解体キングダム"
             score: 1.0
-      - name: "タモリ・山中伸弥の"
+      - name: "タモリ・山中伸弥の!?"
         words:
           - word: "タモリ・山中伸弥の"
             score: 1.0
       - name: "美の巨人"
         words:
           - word: "美の巨人"
+            score: 1.0
+  animes1:
+    monotone_constraints: 1
+    labels:  
+      - name: "攻殻機動隊"
+        words:
+          - word: "攻殻機動隊"
+            score: 1.0
+      - name: "アクセル・ワールド"
+        words:
+          - word: "アクセルワールド"
+            score: 1.0
+          - word: "アクセル・ワールド"
+            score: 1.0
+      - name: "ソードアート・オンライン"
+        words:
+          - word: "ソードアート"
             score: 1.0
   endurance:
     labels:
