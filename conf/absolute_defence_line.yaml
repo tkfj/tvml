@@ -16,7 +16,7 @@ features:
             score: 0.8
   program1:
     monotone_constraints: 1
-    labels:  
+    labels:
       - name: "水戸黄門"
         words:
           - word: "水戸黄門"
@@ -41,6 +41,14 @@ features:
         words:
           - word: "美の巨人"
             score: 1.0
+      - name: "ザ・バックヤード"
+        words:
+          - word: "ザ・バックヤード"
+            score: 1.0
+      - name: "おとな時間研究所"
+        words:
+          - word: "おとな時間研究所"
+            score: 1.0
   animes1:
     monotone_constraints: 1
     labels:  
@@ -58,6 +66,33 @@ features:
         words:
           - word: "ソードアート"
             score: 1.0
+  location1:
+    monotone_constraints: 1
+    labels:
+      - name: "千住"
+        words:
+          - word: "南千住"
+            score: 1.0
+          - word: "北千住"
+            score: 0.8
+      - name: "三ノ輪"
+        words:
+          - word: "三ノ輪"
+            score: 1.0
+      - name: "荒川区"
+        words:
+          - word: "荒川区"
+            score: 0.8
+      - name: "下北沢"
+        words:
+          - word: "下北沢"
+            score: 0.8
+      - name: "三軒茶屋"
+        words:
+          - word: "三軒茶屋"
+            score: 0.8
+          - word: "三茶"
+            score: 0.6
   endurance:
     labels:
       - words:
