@@ -14,6 +14,10 @@ features:
         words:
           - word: "多部未華子"
             score: 0.8
+      - name: "田中麗奈"
+        words:
+          - word: "田中麗奈"
+            score: 0.8
   program1:
     monotone_constraints: 1
     labels:
@@ -64,8 +68,12 @@ features:
             score: 1.0
       - name: "ソードアート・オンライン"
         words:
-          - word: "ソードアート"
+          - word: "ソードアート・オンライン"
             score: 1.0
+          - word: "ソードアートオンライン"
+            score: 1.0
+          - word: "ソードアート"
+            score: 0.8
   location1:
     monotone_constraints: 1
     labels:
