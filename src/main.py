@@ -20,8 +20,12 @@ from transformers import AutoTokenizer, AutoModel
 from sklearn.decomposition import PCA
 import torch
 
+from common_genre import GenreUtil
+
 db_in_path = "./db/tvmlw.db"
 db_out_path = "./db/tvml.db"
+
+genre_util = GenreUtil()
 
 def stream_program_data() -> Iterator[Dict]:
     """
@@ -87,14 +91,17 @@ def main():
         _adl = json.loads(_adltxt) if _adltxt else {}
         return {_fea: float(_adl.get(_fea, 0.0)) for _fea in adl_def['features'].keys() }
 
-    other_feature_names = ['duration', 'genre1_cat', 'channel_cat']
+    other_feature_names = list(itertools.chain(
+        ['duration', 'genre1_cat', 'channel_cat'],
+        genre_util.featurenames,
+    ))
     def make_other_feature(pg):
-        other_features = [
+        return list(itertools.chain([
             scale_duration(pg['duration']),
             pg['genres_arr'][0] if pg['genres_arr'] and len(pg['genres'])>0 else 99,
             pg['network_id']*100000+pg['service_id'],
-        ]
-        return other_features
+        ], genre_util.generate_features(pg['genres']),
+        ))
     
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr, columns=list(itertools.chain(

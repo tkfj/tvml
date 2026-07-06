@@ -1,13 +1,7 @@
 import os
-import sys
-import sqlite3
 import requests
-import itertools
-import json
 
-from typing import Iterator, Dict
-
-class PrepareMecab:
+class MecabUtil:
     def __init__(self):
         self.MECAB_API_URL = os.getenv("MECAB_API_URL")
         self.session = requests.Session()

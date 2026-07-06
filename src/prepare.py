@@ -5,6 +5,9 @@ import os
 from tqdm import tqdm
 import yaml
 
+from common_genre import GenreUtil
+from common_mecab import MecabUtil
+
 db_path_like = "./db/tvlike.db"
 db_path_token = "./db/tvtoken.db"
 db_path_epg = "./db/epg.db"
@@ -138,10 +141,19 @@ conn.execute("""
   )
 """)
 
+genre_util = GenreUtil()
+
+conn.create_function("MOD_GENRE", 1, genre_util.mod_genre)
+
+cur1 = conn.cursor()
 with conn:
-  for t in channels.keys():
-    for s in channels[t]:
-      cursor.execute("INSERT INTO channels VALUES(?,?,1)",[t,s])
+  try:
+    for t in channels.keys():
+      for s in channels[t]:
+        cur1.execute("INSERT INTO channels VALUES(?,?,1)",[t,s])
+  finally:
+      cur1.close()
+  del cur1
 
 def make_absolute_defence_line(pg):
     def _extract(_w):
@@ -209,8 +221,7 @@ with conn:
       ])
   cursor_w.close()
 
-from prepare_mecab import PrepareMecab
-preparer = PrepareMecab()
+mecab_util = MecabUtil()
 with conn:
   cursor.execute(f"""
     SELECT
@@ -235,20 +246,20 @@ with conn:
 
   for row in tqdm(cursor):
     if row['pgm_title'] != row['token_title'] and row['pgm_title'] is not None and len(row['pgm_title'])>0:
-      w1 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(row['pgm_title'])),ensure_ascii=False)
+      w1 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(row['pgm_title'])),ensure_ascii=False)
     elif row['pgm_title'] is not None and len(row['pgm_title'])>0:
       w1 = row['token_title_ipa']
     else:
       w1 = None
     if row['pgm_description'] != row['token_description'] and row['pgm_description'] is not None and len(row['pgm_description'])>0:
-      w2 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(row['pgm_description'])),ensure_ascii=False)
+      w2 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(row['pgm_description'])),ensure_ascii=False)
     elif row['pgm_description'] is not None and len(row['pgm_description'])>0:
       w2 = row['token_description_ipa']
     else:
       w2 = None
     if row['extended'] != row['token_extended'] and row['extended'] is not None and len(row['extended'])>0:
       extended_all = " ".join(f"{k} {v}" for k, v in json.loads(row['extended']).items())
-      w3 = json.dumps(preparer.proc_tokens(preparer.call_mecab_api(extended_all)),ensure_ascii=False)
+      w3 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(extended_all)),ensure_ascii=False)
     elif row['extended'] is not None and len(row['extended'])>0:
       w3 = row['token_extended_ipa']
     else:
@@ -323,7 +334,7 @@ INSERT INTO tvmldb.tvml (
   epg.duration,
   epg.pgm_title,
   epg.pgm_description,
-  epg.genres,
+  MOD_GENRE(epg.genres) as genres,
   epg.extended,
   epg.service_type,
   epg.service_name,
