@@ -125,7 +125,8 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_conf.get('transformers_tokenizer'))
     model = AutoModel.from_pretrained(model_conf.get('transformers_tokenizer')).to(device)
     pca_conf = model_conf.get('pca',{})
-    pca = PCA(**pca_conf)
+    pca_title = PCA(**pca_conf)
+    pca_description = PCA(**pca_conf)
 
     def batch_vectorise(texts, batch_size=512):
         vectors = []
@@ -147,9 +148,9 @@ def main():
         y_all.append(1 if pg['interaction']=='P' else 0)
 
     X_title_full = batch_vectorise(title_full, model_conf.get('transformers_tokenizer_batch_size'))
-    X_title_pca = pca.fit_transform(X_title_full)
+    X_title_pca = pca_title.fit_transform(X_title_full)
     X_description_full = batch_vectorise(description_full, model_conf.get('transformers_tokenizer_batch_size'))
-    X_description_pca = pca.fit_transform(X_description_full)
+    X_description_pca = pca_description.fit_transform(X_description_full)
     X_nparr_all = np.hstack((
         np.array(X_title_pca),
         np.array(X_description_pca),
@@ -243,11 +244,11 @@ def main():
                 input_descriptions = tokenizer(descriptions, return_tensors='pt', padding=True, truncation=True).to(device)
                 with torch.no_grad():
                     output_titles = model(**input_titles)
-                    vec_titles = output_titles.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-                    vec_titles_pca = pca.transform(vec_titles)
+                    vec_titles = output_titles.last_hidden_state.mean(dim=1).cpu().numpy()
+                    vec_titles_pca = pca_title.transform(vec_titles)
                     output_descriptions = model(**input_descriptions)
-                    vec_descriptions = output_descriptions.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-                    vec_descriptions_pca = pca.transform(vec_descriptions)
+                    vec_descriptions = output_descriptions.last_hidden_state.mean(dim=1).cpu().numpy()
+                    vec_descriptions_pca = pca_description.transform(vec_descriptions)
                 for pg,vec_t,vec_d in zip(pgschunk, vec_titles_pca, vec_descriptions_pca):
                     pg['vec_t_ws0'] = vec_t
                     pg['vec_d_ws0'] = vec_d
