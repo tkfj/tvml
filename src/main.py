@@ -105,7 +105,8 @@ def main():
     
     def to_X_pd_from_np(nparr):
         df = pd.DataFrame(nparr, columns=list(itertools.chain(
-            [f'bert_{i+1}' for i in range(pca_conf['n_components'])],
+            [f'title_{i+1}' for i in range(pca_conf['n_components'])],
+            [f'description_{i+1}' for i in range(pca_conf['n_components'])],
             adl_def['features'].keys(),
             other_feature_names,
         )))
@@ -113,8 +114,10 @@ def main():
         df['channel_cat'] = df['channel_cat'].astype(int) #.astype('category')
         return df
 
-    text_full = []
-    X_text_full = []
+    title_full = []
+    X_title_full = []
+    description_full = []
+    X_description_full = []
     X_adl = []
     X_others = []
     y_all = []
@@ -136,16 +139,20 @@ def main():
         return np.vstack(vectors)
 
     for pg in pg_filter4classifier(pgs):
-        text_full.append(f"{pg['pgm_title'] or ''} {pg['pgm_description'] or ''}")
+        title_full.append(pg['pgm_title'] or '')
+        description_full.append(pg['pgm_description'] or '')
         _adl = make_absolute_defence_line(pg)
         X_adl.append([_sc for _sc in _adl.values()])
         X_others.append(make_other_feature(pg))
         y_all.append(1 if pg['interaction']=='P' else 0)
 
-    X_text_full = batch_vectorise(text_full, model_conf.get('transformers_tokenizer_batch_size'))
-    X_text_pca = pca.fit_transform(X_text_full)
+    X_title_full = batch_vectorise(title_full, model_conf.get('transformers_tokenizer_batch_size'))
+    X_title_pca = pca.fit_transform(X_title_full)
+    X_description_full = batch_vectorise(description_full, model_conf.get('transformers_tokenizer_batch_size'))
+    X_description_pca = pca.fit_transform(X_description_full)
     X_nparr_all = np.hstack((
-        np.array(X_text_pca),
+        np.array(X_title_pca),
+        np.array(X_description_pca),
         np.array(X_adl),
         np.array(X_others),
     ))
@@ -154,6 +161,7 @@ def main():
     print(X_pd_all)
 
     monotone_constraints = tuple(itertools.chain(
+        [0] * pca_conf['n_components'],
         [0] * pca_conf['n_components'],
         [adl_def['features'][_k].get('monotone_constraints', 0) for _k in adl_def['features'].keys()],
         [0] * len(other_feature_names),
@@ -164,6 +172,17 @@ def main():
     X_tr, X_te, y_tr, y_te = train_test_split(
         X_pd_all, y_nparr_all, test_size=0.2, random_state=43, stratify=y_nparr_all
     )
+    #正例かつ絶対防衛ラインの特徴量を持つものはサンプルウェイトを設定
+    #(複数ある場合は最大値を使用)
+    sample_weights = np.ones(len(y_tr))
+    max_multipliers = np.ones(len(y_tr))
+    for _feature, _def in adl_def['features'].items():
+        _mux = _def.get('sample_weight', 1.0)
+        if _mux == 1.0:
+            continue
+        is_hit = X_tr[_feature] > 0
+        max_multipliers = np.maximum(max_multipliers, np.where(is_hit, _mux, 1.0))
+    sample_weights = np.where(y_tr == 1, max_multipliers, 1.0)
 
     pos_count = np.sum(y_tr == 1)
     neg_count = np.sum(y_tr == 0)
@@ -175,7 +194,7 @@ def main():
       monotone_constraints = monotone_constraints,
       **xgb_conf
     )
-    classifier.fit(X_tr, y_tr)
+    classifier.fit(X_tr, y_tr, sample_weight = sample_weights)
     print('finish.', file=sys.stderr, flush=True);
 
     # 学習に使っていない「テストデータ」で予測・評価
@@ -218,18 +237,24 @@ def main():
         cursorz = connz.cursor()
         with connz:
             for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), model_conf.get('transformers_tokenizer_batch_size')):
-                txts = [f'{pg["pgm_title"] or ''} {pg["pgm_description"] or ''}' for pg in pgschunk]
-                inputs = tokenizer(txts, return_tensors='pt', padding=True, truncation=True).to(device)
+                titles = [pg["pgm_title"] or '' for pg in pgschunk]
+                descriptions = [pg["pgm_description"] or '' for pg in pgschunk]
+                input_titles = tokenizer(titles, return_tensors='pt', padding=True, truncation=True).to(device)
+                input_descriptions = tokenizer(descriptions, return_tensors='pt', padding=True, truncation=True).to(device)
                 with torch.no_grad():
-                    outputs = model(**inputs)
-                    vecs = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-                    vecs = pca.transform(vecs)
-                for pg,vec in zip(pgschunk, vecs):
-                    pg['vec_ws0'] = vec
+                    output_titles = model(**input_titles)
+                    vec_titles = output_titles.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
+                    vec_titles_pca = pca.transform(vec_titles)
+                    output_descriptions = model(**input_descriptions)
+                    vec_descriptions = output_descriptions.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
+                    vec_descriptions_pca = pca.transform(vec_descriptions)
+                for pg,vec_t,vec_d in zip(pgschunk, vec_titles_pca, vec_descriptions_pca):
+                    pg['vec_t_ws0'] = vec_t
+                    pg['vec_d_ws0'] = vec_d
                     pg['adl'] = make_absolute_defence_line(pg)
                     pg['vec_adl'] = np.array([_sc for _sc in pg['adl'].values()])
                     pg['vec_meta'] = np.array(make_other_feature(pg))
-                vec_join = np.vstack([np.hstack((pg['vec_ws0'], pg['vec_adl'], pg['vec_meta'],)) for pg in pgschunk])
+                vec_join = np.vstack([np.hstack((pg['vec_t_ws0'], pg['vec_d_ws0'], pg['vec_adl'], pg['vec_meta'],)) for pg in pgschunk])
                 df = to_X_pd_from_np(vec_join)
                 for i, pg in enumerate(pgschunk):
                     pg['pred_proba'] = float(classifier.predict_proba(df)[i][1])

@@ -1,6 +1,7 @@
 features:
   actress1:
     monotone_constraints: 1
+    sample_weight: 10.0
     labels:
       - name: "桜井日奈子"
         words:
@@ -20,6 +21,7 @@ features:
             score: 0.8
   program1:
     monotone_constraints: 1
+    sample_weight: 10.0
     labels:
       - name: "水戸黄門"
         words:
@@ -55,6 +57,7 @@ features:
             score: 1.0
   animes1:
     monotone_constraints: 1
+    sample_weight: 10.0
     labels:  
       - name: "攻殻機動隊"
         words:
@@ -76,6 +79,7 @@ features:
             score: 0.8
   location1:
     monotone_constraints: 1
+    sample_weight: 10.0
     labels:
       - name: "千住"
         words:
