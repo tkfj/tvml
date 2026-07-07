@@ -39,6 +39,10 @@ features:
         words:
           - word: "解体キングダム"
             score: 1.0
+      - name: "探検ファクトリー"
+        words:
+          - word: "探検ファクトリー"
+            score: 1.0
       - name: "タモリ・山中伸弥の!?"
         words:
           - word: "タモリ・山中伸弥の"
