@@ -8,6 +8,36 @@ import yaml
 from common_genre import GenreUtil
 from common_mecab import MecabUtil
 
+import re
+import unicodedata
+
+def normalize_zen_han_text(text: str) -> str:
+    """英数と基本的な記号をASCIIに、半角カナを全角に統一。"""
+    #unicodeのnormarize (NFKC)は囲み文字を処理してしまうため、自前の実装。
+    if not text:
+        return None
+
+    # \u3000 (全角SP)
+    # \uFF01 〜 \uFF5E (全角英数・記号)
+    # \uFF61 〜 \uFF9F (半角カナ・半角句読点)
+    target_block = re.compile(r'[\u3000\uFF01-\uFF5E\uFF61-\uFF9F]+')
+
+    def _replace(match):
+        return unicodedata.normalize('NFKC', match.group(0))
+    text = target_block.sub(_replace, text)
+    text = re.sub(r'^\s+', '', text)
+    text = re.sub(r'\s+$', '', text)
+    if len(text)==0:
+       text = None
+    return text
+
+def normalize_zen_han_json(jsontext: str) -> str:
+    if not jsontext:
+        return None
+    _json = json.loads(jsontext)
+    _json_norm = {normalize_zen_han_text(_k) or '':normalize_zen_han_text(_v) or '' for _k,_v in _json.items()}
+    return json.dumps(_json_norm, ensure_ascii=False)
+
 db_path_like = "./db/tvlike.db"
 db_path_token = "./db/tvtoken.db"
 db_path_epg = "./db/epg.db"
@@ -47,9 +77,13 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
   extended TEXT,
   service_type INTEGER NOT NULL,
   service_name TEXT NOT NULL,
+  service_name_norm TEXT NOT NULL,
   remote_control_key_id INTEGER,
   channel TEXT NOT NULL,
   channel_type TEXT NOT NULL,
+  norm_title TEXT,
+  norm_description TEXT,
+  norm_extended TEXT,
   token_title_ipa TEXT,
   token_title_neologd TEXT,
   token_description_ipa TEXT,
@@ -74,6 +108,9 @@ CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvtoken (
   pgm_title TEXT,
   pgm_description TEXT,
   extended TEXT,
+  norm_title TEXT,
+  norm_description TEXT,
+  norm_extended TEXT,
   token_title_ipa TEXT,
   token_title_neologd TEXT,
   token_description_ipa TEXT,
@@ -157,6 +194,8 @@ del adl_row
 genre_util = GenreUtil()
 
 conn.create_function("MOD_GENRE", 1, genre_util.mod_genre)
+conn.create_function("NORM_TEXT", 1, normalize_zen_han_text)
+conn.create_function("NORM_JSON", 1, normalize_zen_han_json)
 
 cur1 = conn.cursor()
 with conn:
@@ -239,6 +278,9 @@ with conn:
   cursor.execute(f"""
     SELECT
       epg.*,
+      NORM_TEXT(epg.pgm_title) AS norm_title,
+      NORM_TEXT(epg.pgm_description) AS norm_description,
+      NORM_JSON(epg.extended) AS norm_extended,
       token.pgm_title AS token_title,
       token.pgm_description AS token_description,
       token.extended AS token_extended,
@@ -257,53 +299,99 @@ with conn:
     OR epg.extended IS DISTINCT FROM token.extended
   """)
 
-  for row in tqdm(cursor):
-    if row['pgm_title'] != row['token_title'] and row['pgm_title'] is not None and len(row['pgm_title'])>0:
-      w1 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(row['pgm_title'])),ensure_ascii=False)
-    elif row['pgm_title'] is not None and len(row['pgm_title'])>0:
-      w1 = row['token_title_ipa']
-    else:
-      w1 = None
-    if row['pgm_description'] != row['token_description'] and row['pgm_description'] is not None and len(row['pgm_description'])>0:
-      w2 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(row['pgm_description'])),ensure_ascii=False)
-    elif row['pgm_description'] is not None and len(row['pgm_description'])>0:
-      w2 = row['token_description_ipa']
-    else:
-      w2 = None
-    if row['extended'] != row['token_extended'] and row['extended'] is not None and len(row['extended'])>0:
-      extended_all = " ".join(f"{k} {v}" for k, v in json.loads(row['extended']).items())
-      w3 = json.dumps(mecab_util.proc_tokens(mecab_util.call_mecab_api(extended_all)),ensure_ascii=False)
-    elif row['extended'] is not None and len(row['extended'])>0:
-      w3 = row['token_extended_ipa']
-    else:
-      w3 = None
-    if (row['pgm_title'] != row['token_title']) or (row['pgm_description'] != row['token_description']) or (row['extended'] != row['token_extended']):
-      conn.execute("""
-        INSERT INTO tvtokendb.tvtoken (
-          asof,
-          pgm_uid,
-          start_at,
-          pgm_title,
-          pgm_description,
-          extended,
-          token_title_ipa,
-          token_description_ipa,
-          token_extended_ipa
-        ) VALUES (
-          ?,?,?,?,?,?,?,?,?
+  for batch in itertools.batched(tqdm(cursor), 256):
+    flags = [{'title':-1,'description':-1,'extended':-1} for _ in range(len(batch))] # * N だと同じ参照になるのでrangeで回す
+    texts = list()
+    j = 0
+    for _f, row in zip(flags, batch):
+      if row['pgm_title'] != row['token_title'] and row['norm_title'] is not None and len(row['norm_title'])>0:
+        texts.append(row['norm_title'].upper())
+        _f['title'] = j
+        j+=1
+      if row['pgm_description'] != row['token_description'] and row['norm_description'] is not None and len(row['norm_description'])>0:
+        texts.append(row['norm_description'].upper())
+        _f['description'] = j
+        j+=1
+      if row['extended'] != row['token_extended'] and row['norm_extended'] is not None and len(row['norm_extended'])>0:
+        extended_all = " ".join(f"{k} {v}" for k, v in json.loads(row['norm_extended']).items())
+        texts.append(extended_all.upper())
+        _f['extended'] = j
+        j+=1
+    tokenizeds_ipadic = mecab_util.call_mecab_api_batch(texts, dic='IPADic')
+    tokenizeds_neologd = mecab_util.call_mecab_api_batch(texts, dic='NEOlogd')
+
+    for _f, row in zip(flags, batch):
+      if _f['title']>=0:
+        w1a = json.dumps(mecab_util.proc_tokens(tokenizeds_ipadic[_f['title']]),ensure_ascii=False)
+        w1b = json.dumps(mecab_util.proc_tokens(tokenizeds_neologd[_f['title']]),ensure_ascii=False)
+      elif row['norm_title'] is not None and len(row['norm_title'])>0:
+        w1a = row['token_title_ipa']
+        w1b = row['token_title_neologd']
+      else:
+        w1a = None
+        w1b = None
+      if _f['description']>=0:
+        w2a = json.dumps(mecab_util.proc_tokens(tokenizeds_ipadic[_f['description']]),ensure_ascii=False)
+        w2b = json.dumps(mecab_util.proc_tokens(tokenizeds_neologd[_f['description']]),ensure_ascii=False)
+      elif row['norm_description'] is not None and len(row['norm_description'])>0:
+        w2a = row['token_description_ipa']
+        w2b = row['token_description_neologd']
+      else:
+        w2a = None
+        w2b = None
+      if _f['extended']>=0:
+        w3a = json.dumps(mecab_util.proc_tokens(tokenizeds_ipadic[_f['extended']]),ensure_ascii=False)
+        w3b = json.dumps(mecab_util.proc_tokens(tokenizeds_neologd[_f['extended']]),ensure_ascii=False)
+      elif row['norm_extended'] is not None and len(row['norm_extended'])>0:
+        w3a = row['token_extended_ipa']
+        w3b = row['token_extended_neologd']
+      else:
+        w3a = None
+        w3b = None
+      if (_f['title']>=0 or _f['description']>=0 or _f['extended']>=0):
+        conn.execute("""
+          INSERT INTO tvtokendb.tvtoken (
+            asof,
+            pgm_uid,
+            start_at,
+            pgm_title,
+            pgm_description,
+            extended,
+            norm_title,
+            norm_description,
+            norm_extended,
+            token_title_ipa,
+            token_title_neologd,
+            token_description_ipa,
+            token_description_neologd,
+            token_extended_ipa,
+            token_extended_neologd
+          ) VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+          )
+          ON CONFLICT(pgm_uid, start_at)
+          DO UPDATE SET
+            asof=EXCLUDED.asof,
+            pgm_title=EXCLUDED.pgm_title,
+            pgm_description=EXCLUDED.pgm_description,
+            extended=EXCLUDED.extended,
+            norm_title=EXCLUDED.norm_title,
+            norm_description=EXCLUDED.norm_description,
+            norm_extended=EXCLUDED.norm_extended,
+            token_title_ipa=EXCLUDED.token_title_ipa,
+            token_title_neologd=EXCLUDED.token_title_neologd,
+            token_description_ipa=EXCLUDED.token_description_ipa,
+            token_description_neologd=EXCLUDED.token_description_neologd,
+            token_extended_ipa=EXCLUDED.token_extended_ipa,
+            token_extended_neologd=EXCLUDED.token_extended_neologd
+          """
+          , [
+            row['asof'], row['pgm_uid'], row['start_at'],
+            row['pgm_title'], row['pgm_description'], row['extended'],
+            row['norm_title'], row['norm_description'], row['norm_extended'],
+            w1a, w1b, w2a, w2b, w3a, w3b
+          ]
         )
-        ON CONFLICT(pgm_uid, start_at)
-        DO UPDATE SET
-          asof=EXCLUDED.asof,
-          pgm_title=EXCLUDED.pgm_title,
-          pgm_description=EXCLUDED.pgm_description,
-          extended=EXCLUDED.extended,
-          token_title_ipa=EXCLUDED.token_title_ipa,
-          token_description_ipa=EXCLUDED.token_description_ipa,
-          token_extended_ipa=EXCLUDED.token_extended_ipa
-        """
-        , [row['asof'], row['pgm_uid'], row['start_at'], row['pgm_title'], row['pgm_description'], row['extended'], w1, w2, w3]
-      )
 
 insert_pgm_sql = f"""
 INSERT INTO tvmldb.tvml (
@@ -322,9 +410,13 @@ INSERT INTO tvmldb.tvml (
   extended,
   service_type,
   service_name,
+  service_name_norm,
   remote_control_key_id,
   channel,
   channel_type,
+  norm_title,
+  norm_description,
+  norm_extended,
   token_title_ipa,
   token_title_neologd,
   token_description_ipa,
@@ -343,17 +435,21 @@ INSERT INTO tvmldb.tvml (
   epg.event_id,
   epg.is_free,
   epg.start_at,
-  epg.start_at-epg.duration as end_at ,
+  epg.start_at-epg.duration AS end_at ,
   epg.duration,
   epg.pgm_title,
   epg.pgm_description,
-  MOD_GENRE(epg.genres) as genres,
+  MOD_GENRE(epg.genres) AS genres,
   epg.extended,
   epg.service_type,
   epg.service_name,
+  NORM_TEXT(epg.service_name) AS service_name_norm,
   epg.remote_control_key_id,
   epg.channel,
   epg.channel_type,
+  tvtoken.norm_title,
+  tvtoken.norm_description,
+  tvtoken.norm_extended,
   tvtoken.token_title_ipa,
   tvtoken.token_title_neologd,
   tvtoken.token_description_ipa,
@@ -364,18 +460,18 @@ INSERT INTO tvmldb.tvml (
   adl.defence_labels,
   COALESCE(tvlike.interaction, '-'),
   COALESCE(channels.is_target_channel, 0)
-FROM epgdb.epg as epg
-LEFT OUTER JOIN tvlikedb.tvlike as tvlike
+FROM epgdb.epg AS epg
+LEFT OUTER JOIN tvlikedb.tvlike AS tvlike
 ON epg.pgm_uid = tvlike.pgm_uid
 AND epg.start_at > tvlike.start_at - 8*24*60*60*1000  -- TODO 番組がずれたけどlikeしなおしてない場合の救済が必要。単純に前後８日で結合すれば良いのでは
 AND epg.start_at < tvlike.start_at + 8*24*60*60*1000  -- TODO 番組がずれたけどlikeしなおしてない場合の救済が必要。単純に前後８日で結合すれば良いのでは
 AND epg.pgm_title = tvlike.pgm_title
-LEFT OUTER JOIN tvtokendb.tvtoken as tvtoken
+LEFT OUTER JOIN tvtokendb.tvtoken AS tvtoken
 ON epg.pgm_uid = tvtoken.pgm_uid
 AND epg.start_at > tvtoken.start_at - 8*24*60*60*1000
 AND epg.start_at < tvtoken.start_at + 8*24*60*60*1000
 AND epg.pgm_title = tvtoken.pgm_title
-LEFT OUTER JOIN absolute_defence_line as adl
+LEFT OUTER JOIN absolute_defence_line AS adl
 ON epg.pgm_uid = adl.pgm_uid
 AND epg.start_at = tvtoken.start_at
 LEFT OUTER JOIN channels

@@ -8,5 +8,6 @@ services:
       - ../../tvdb:/app/db:cached
     environment:
       - MECAB_API_URL=http://psv.internal:8097/parse
+      - MECAB_API_URL_BATCH=http://psv.internal:8097/parseAll
     # 開発中にコンテナが終了しないようにする
     command: /bin/sh -c "while sleep 1000; do :; done"

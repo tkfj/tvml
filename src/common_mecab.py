@@ -1,18 +1,26 @@
 import os
 import requests
+from typing import Literal, List
 
 class MecabUtil:
     def __init__(self):
         self.MECAB_API_URL = os.getenv("MECAB_API_URL")
+        self.MECAB_API_URL_BATCH = os.getenv("MECAB_API_URL_BATCH")
         self.session = requests.Session()
 
-    def call_mecab_api(self,text):
-        text = text.upper()
-        text = text.replace("(","（")
-        text = text.replace(")","）")
-        text = text.replace("[","［")
-        text = text.replace("]","］")
-        response = self.session.post(self.MECAB_API_URL, json={"text": text})
+    def call_mecab_api_batch(self,texts:List[str],dic:Literal["IPADic", "NEOlogd"]="IPADic"):
+        urlparams = {
+            'dic': dic,
+        }
+        response = self.session.post(self.MECAB_API_URL_BATCH, params=urlparams, json={"texts": texts})
+        tokens = response.json().get("analysis")
+        return tokens
+
+    def call_mecab_api(self,text,dic:Literal["IPADic", "NEOlogd"]="IPADic"):
+        urlparams = {
+            'dic': dic,
+        }
+        response = self.session.post(self.MECAB_API_URL, params=urlparams, json={"text": text})
         tokens = response.json().get("analysis")
         # # 無視された空白を補完するための処理
         # # 連続する名詞を複合名詞として結合する処理で、過剰に結合させないため
