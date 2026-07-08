@@ -13,13 +13,11 @@ db_path_token = "./db/tvtoken.db"
 db_path_epg = "./db/epg.db"
 db_path_ml = "./db/tvml.db"
 db_path_mlw = "./db/tvmlw.db"
+db_path_adl = "./db/adl.db"
 
 with open(db_path_mlw,'w') as f:
     # ファイルがあれば切り捨てる
     pass
-
-with open("./conf/absolute_defence_line.yaml") as f:
-    adl_def = yaml.safe_load(f)
 
 conn = sqlite3.connect(':memory:')
 conn.row_factory = sqlite3.Row  # カラム名でアクセス可能にする
@@ -29,6 +27,7 @@ cursor.execute(f"ATTACH DATABASE ? AS epgdb", [db_path_epg])
 cursor.execute(f"ATTACH DATABASE ? AS tvtokendb", [db_path_token])
 cursor.execute(f"ATTACH DATABASE ? AS tvlikedb", [db_path_like])
 cursor.execute(f"ATTACH DATABASE ? AS tvmldb", [db_path_mlw])
+cursor.execute(f"ATTACH DATABASE ? AS adldb", [db_path_adl])
 
 create_tvml_sql = """
 CREATE TABLE IF NOT EXISTS {{DB_NAME}}.tvml (
@@ -140,6 +139,20 @@ conn.execute("""
     PRIMARY KEY (channel_type, service_id)
   )
 """)
+conn.execute("""
+  CREATE TABLE IF NOT EXISTS adldb.adl (
+    adl_id INTEGER NOT NULL,
+    adl_yaml TEXT,
+    PRIMARY KEY (adl_id)
+  )
+""")
+cursor.execute("SELECT adl_yaml FROM adldb.adl WHERE adl_id = 1")
+adl_row = cursor.fetchone()
+if adl_row:
+  adl_def = yaml.safe_load(adl_row['adl_yaml'])
+else:
+  adl_def = {'features': []}
+del adl_row
 
 genre_util = GenreUtil()
 
@@ -377,4 +390,5 @@ cursor.execute(f"DETACH DATABASE epgdb")
 cursor.execute(f"DETACH DATABASE tvtokendb")
 cursor.execute(f"DETACH DATABASE tvlikedb")
 cursor.execute(f"DETACH DATABASE tvmldb")
+cursor.execute(f"DETACH DATABASE adldb")
 conn.close()
