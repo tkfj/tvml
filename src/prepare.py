@@ -151,7 +151,7 @@ adl_row = cursor.fetchone()
 if adl_row:
   adl_def = yaml.safe_load(adl_row['adl_yaml'])
 else:
-  adl_def = {'features': []}
+  adl_def = {'features': {}}
 del adl_row
 
 genre_util = GenreUtil()
