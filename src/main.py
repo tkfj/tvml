@@ -140,8 +140,8 @@ def main():
         return np.vstack(vectors)
 
     for pg in pg_filter4classifier(pgs):
-        title_full.append(pg['pgm_title'] or '')
-        description_full.append(pg['pgm_description'] or '')
+        title_full.append(pg['norm_title'] or '')
+        description_full.append(pg['norm_description'] or '')
         _adl = make_absolute_defence_line(pg)
         X_adl.append([_sc for _sc in _adl.values()])
         X_others.append(make_other_feature(pg))
@@ -239,8 +239,8 @@ def main():
         cursorz = connz.cursor()
         with connz:
             for pgschunk in itertools.batched(tqdm(pg_filtered(pgs)), model_conf.get('transformers_tokenizer_batch_size')):
-                titles = [pg["pgm_title"] or '' for pg in pgschunk]
-                descriptions = [pg["pgm_description"] or '' for pg in pgschunk]
+                titles = [pg["norm_title"] or '' for pg in pgschunk]
+                descriptions = [pg["norm_description"] or '' for pg in pgschunk]
                 input_titles = tokenizer(titles, return_tensors='pt', padding=True, truncation=True).to(device)
                 input_descriptions = tokenizer(descriptions, return_tensors='pt', padding=True, truncation=True).to(device)
                 with torch.no_grad():
@@ -264,7 +264,7 @@ def main():
                 for pg in pgschunk:
                     cursorz.execute('update tvml set pred_label=?, pred_proba=? where tvml_id=?',[pg['pred_label'], pg['pred_proba'], pg['tvml_id']])
                     if pg['is_target_channel'] == 1 and pg['pred_label'] == 'P':
-                        print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['pgm_title']} {pg['pgm_description']}")
+                        print(f"{pg['pred_label']}({pg['pred_proba']:.4f}) {pg['norm_title'] or ''} {pg['norm_description'] or ''}")
 
     finally:
         connz.close()
