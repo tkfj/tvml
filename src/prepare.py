@@ -211,11 +211,11 @@ def make_absolute_defence_line(pg):
     def _extract(_w):
         if _w is None or len(_w)==0:
             return False
-        if pg['pgm_title'] and _w in pg['pgm_title']:
+        if pg['norm_title'] and _w in pg['norm_title']:
             return True
-        if pg['pgm_description'] and _w in pg['pgm_description']:
+        if pg['norm_description'] and _w in pg['norm_description']:
             return True
-        if pg['extended'] and _w in pg['extended']:#TODO JSON 展開する
+        if pg['norm_extended'] and _w in pg['norm_extended']:#TODO JSON 展開する
             return True
         return False
     _adl_features = {}
