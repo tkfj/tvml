@@ -251,11 +251,14 @@ cursor.execute("""
 """)
 with conn:
   cursor.execute("""
-    SELECT *
+    SELECT *,
+    NORM_TEXT(epg.pgm_title) AS norm_title,
+    NORM_TEXT(epg.pgm_description) AS norm_description,
+    NORM_JSON(epg.extended) AS norm_extended
     FROM epgdb.epg
-    WHERE (pgm_title IS NOT NULL AND pgm_title != '')
-    OR (pgm_description IS NOT NULL AND pgm_description != '')
-    OR (extended IS NOT NULL AND extended != '')
+    WHERE (norm_title IS NOT NULL AND norm_title != '')
+    OR (norm_description IS NOT NULL AND norm_description != '')
+    OR (norm_extended IS NOT NULL AND norm_extended != '')
   """)
   cursor_w = conn.cursor()
   cursor_w.row_factory = sqlite3.Row
