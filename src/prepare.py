@@ -20,11 +20,13 @@ def normalize_zen_han_text(text: str) -> str:
     # \u3000 (全角SP)
     # \uFF01 〜 \uFF5D (全角英数・記号)→全角チルダ(5E)、二重角かっこ《》(5F,60)を除く。
     # \uFF61 〜 \uFF9F (半角カナ・半角句読点)
+    # ※ ¥u301C 波ダッシュはここでは変換しない(基本的には来ないはず)
     target_block = re.compile(r'[\u3000\uFF01-\uFF5D\uFF61-\uFF9F]+')
 
     def _replace(match):
         return unicodedata.normalize('NFKC', match.group(0))
     text = target_block.sub(_replace, text)
+    text = text.replace('\uFF5E', '\u301C') # 全角チルダを波ダッシュに寄せる
     text = re.sub(r'^\s+', '', text)
     text = re.sub(r'\s+$', '', text)
     if len(text)==0:

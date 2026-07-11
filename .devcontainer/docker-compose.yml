@@ -9,5 +9,12 @@ services:
     environment:
       - MECAB_API_URL=http://psv.internal:8097/parse
       - MECAB_API_URL_BATCH=http://psv.internal:8097/parseAll
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     # 開発中にコンテナが終了しないようにする
     command: /bin/sh -c "while sleep 1000; do :; done"
