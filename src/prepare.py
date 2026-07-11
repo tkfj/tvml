@@ -18,9 +18,9 @@ def normalize_zen_han_text(text: str) -> str:
         return None
 
     # \u3000 (全角SP)
-    # \uFF01 〜 \uFF5E (全角英数・記号)
+    # \uFF01 〜 \uFF5D (全角英数・記号)→全角チルダ(5E)、二重角かっこ《》(5F,60)を除く。
     # \uFF61 〜 \uFF9F (半角カナ・半角句読点)
-    target_block = re.compile(r'[\u3000\uFF01-\uFF5E\uFF61-\uFF9F]+')
+    target_block = re.compile(r'[\u3000\uFF01-\uFF5D\uFF61-\uFF9F]+')
 
     def _replace(match):
         return unicodedata.normalize('NFKC', match.group(0))
