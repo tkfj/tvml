@@ -16,5 +16,8 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    tty: true
+    stdin_open: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 開発中にコンテナが終了しないようにする
-    command: /bin/sh -c "while sleep 1000; do :; done"

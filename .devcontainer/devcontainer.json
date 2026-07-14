@@ -1,17 +1,43 @@
 {
   "name": "TVML",
   "dockerComposeFile": [
-    "docker-compose.yml"
+    "./docker-compose.yml"
   ],
   "service": "app",
   "workspaceFolder": "/app",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached"
+  ],
+  "remoteUser": "ubuntu",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "ubuntu",
+      "uid": "auto",
+      "gid": "auto",
+      "configureZshAsDefaultShell": true
+    }
+  },
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
-      ]
+        "charliermarsh.ruff",
+        "ms-pyright.pyright",
+        "njpwerner.autodocstring"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "python.defaultInterpreterPath": "/app/.venv/bin/python",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports.ruff": "explicit",
+            "source.fixAll.ruff": "explicit"
+          }
+        }
+      }
     }
-  },
-  "remoteUser": "root"
+  }
 }
