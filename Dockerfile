@@ -11,6 +11,11 @@ ARG USER_GID=$USER_UID
 #     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
 #     && chmod 0440 /etc/sudoers.d/$USERNAME
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH"
+    
 ENV TZ=Asia/Tokyo
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -24,15 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 依存関係
-COPY --chown=$USERNAME:$USER_GID requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt --break-system-packages
+COPY --chown=$USERNAME:$USER_GID ./pyproject.toml ./uv.lock* ./
+RUN uv sync
 
-# ソースコードのコピー
 COPY --chown=$USERNAME:$USER_GID ./src ./src
 COPY --chown=$USERNAME:$USER_GID ./conf ./conf
 
 USER $USERNAME
 
-# 本番実行用コマンド
 CMD ["python", "src/main.py"]

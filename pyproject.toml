@@ -1,0 +1,36 @@
+[project]
+name = "tvml"
+version = "0.1.0"
+description = "TVML"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "requests",
+    "scikit-learn>=1.9.0",
+    "pandas",
+    "PyYAML",
+    "xgboost>=2.1.4",
+    "plotext",
+    "cython",
+    "tqdm",
+    "transformers",
+    "torch>=2.6.0",
+    "fugashi",
+    "unidic-lite",
+    "faust-cchardet",
+]
+
+[tool.uv]
+# 現在の開発コンテナ環境（Linux / Python 3.12）のみを明示的にターゲットにする
+environments = [
+    "sys_platform == 'linux' and python_version == '3.12'"
+]
+# CUDA用のPyTorchインデックスを特別に定義
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true # 通常のパッケージ検索からは除外し、指定したものだけに適用する
+
+# torch を上記インデックスに紐付ける
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
