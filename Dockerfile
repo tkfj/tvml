@@ -37,4 +37,4 @@ COPY --chown=$USERNAME:$USER_GID ./conf ./conf
 
 USER $USERNAME
 
-CMD ["python", "src/main.py"]
+CMD ["uv", "run", "src/main.py"]
